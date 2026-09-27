@@ -425,7 +425,7 @@ input[type="color"] { width: 44px; height: 32px; padding: 2px; border: 1px solid
 .detail-card .detail-head select { flex: 1; height: 30px; padding: 2px 8px; font-size: 12px; }
 .detail-card input, .detail-card textarea { font-size: 12.5px; margin-top: 6px; }
 
-.motion-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; }
+.motion-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
 .motion-grid button { display: grid; gap: 4px; justify-items: center; padding: 8px 2px 6px; border: 1.5px solid var(--line); border-radius: 9px; background: #fff; font-size: 11px; font-weight: 700; color: var(--ink-2); }
 .motion-grid button:hover { border-color: var(--line-2); background: var(--surface-2); }
 .motion-grid button.selected { border-color: var(--accent); color: var(--accent-ink); background: var(--accent-soft); }
@@ -440,8 +440,17 @@ input[type="color"] { width: 44px; height: 32px; padding: 2px; border: 1px solid
 .motion-grid button:hover .glyph[data-kind="click"] i:nth-child(2) { animation-delay: .7s; }
 .motion-grid button:hover .glyph[data-kind="click"] i:nth-child(3) { animation-delay: 1.4s; }
 .motion-grid .glyph[data-kind="none"] i { opacity: .45; }
+/* spotlight: all three bars stay, one at a time is bright */
+.motion-grid .glyph[data-kind="spotlight"] i { opacity: .25; }
+.motion-grid .glyph[data-kind="spotlight"] i:nth-child(2) { opacity: .95; }
+.motion-grid button:hover .glyph[data-kind="spotlight"] i { animation: g-spot 2.1s steps(1) infinite; }
+.motion-grid button:hover .glyph[data-kind="spotlight"] i:nth-child(2) { animation-delay: .7s; }
+.motion-grid button:hover .glyph[data-kind="spotlight"] i:nth-child(3) { animation-delay: 1.4s; }
 @keyframes g-fade { from { opacity: 0; } }
 @keyframes g-rise { from { opacity: 0; transform: translateY(5px); } }
+@keyframes g-spot { 0% { opacity: .95; } 33% { opacity: .25; } }
+.mg-grid { row-gap: 10px; }
+.mg-grid > .field:last-child { grid-column: 1 / -1; }
 
 /* ------------------------------------------------------------------ dialogs */
 dialog { width: min(760px, calc(100vw - 32px)); max-height: calc(100vh - 64px); padding: 0; border: 0; border-radius: 16px; box-shadow: var(--shadow-lg); color: var(--ink); }

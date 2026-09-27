@@ -442,24 +442,28 @@ test("chat can change the deck's motion graphics and keeps a slide's own motion 
     {
       reply: "表紙と章扉の背景を波にし、2枚目の文言を短くしました。",
       operations: [{ op: "replace", slide: 2, content: { type: "content", title: "本文1", takeaway: "短い結論", points: ["A"] } }],
-      motion: { backdrop: "waves", kinetic: "mask" },
+      motion: { backdrop: "waves", kinetic: "mask", entrance: "drop", emphasis: "marker" },
       suggestions: [],
     },
   ], async (server, prompts) => {
     const slides = shortDeck(4).slideData;
     slides[1].kinetic = "chars";
     slides[1].backdrop = "lines";
-    const deck = { title: "テスト", theme: "clarity", transition: "fade", motion: { kinetic: "mask", backdrop: "none" }, slides };
+    Object.assign(slides[1], { entrance: "flip", emphasis: "circle", transition: "curtain" });
+    const deck = { title: "テスト", theme: "clarity", transition: "fade", motion: { kinetic: "mask", backdrop: "none", emphasis: "marker" }, slides };
     const job = await waitForJob(server, (await (await server.postJson("/api/decks/chat", { deck, message: "表紙の背景をもっと動かして" })).json()).jobId);
     assert.equal(job.status, "completed", job.error);
     const { chat } = job;
-    assert.deepEqual(chat.motion, { backdrop: "waves" }, "only what changes is proposed");
+    assert.deepEqual(chat.motion, { backdrop: "waves", entrance: "drop" }, "only what changes is proposed");
     assert.match(chat.summary, /動きを変更/);
     assert.equal(chat.slides[1].kinetic, "chars", "the slide's own kinetic type stays");
     assert.equal(chat.slides[1].backdrop, "lines", "and so does its backdrop");
+    assert.deepEqual([chat.slides[1].entrance, chat.slides[1].emphasis, chat.slides[1].transition], ["flip", "circle", "curtain"], "and its own entrance, emphasis and transition");
     const [prompt] = await prompts();
-    assert.match(prompt, /大きな文字の動き: mask、背景の動き: none/);
+    assert.match(prompt, /大きな文字の動き: mask、背景の動き: none、強調: marker/);
     assert.match(prompt, /kinetic・backdrop/);
+    assert.match(prompt, /spotlight/);
+    assert.match(prompt, /curtain（幕が中央から開く）/);
   });
 });
 

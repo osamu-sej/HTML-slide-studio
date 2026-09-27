@@ -61,7 +61,13 @@
   // Characters that may not start a line ride with the unit before; opening brackets ride with the unit after.
   const NO_START = /^[、。，．,.)）」』】〕〉》！？!?:：;；ー〜…‥・ぁぃぅぇぉっゃゅょゎァィゥェォッャュョヮヵヶ々ゝゞ%％]+$/u;
   const NO_END = /^[(（「『【〔〈《]+$/u;
-  const BUDGET = { mask: [900, 70], words: [1000, 90], chars: [1100, 45], type: [1700, 60], scramble: [1300, 55] };
+  // [the whole line's time budget, the longest gap between two units] in ms, per style.
+  const BUDGET = {
+    mask: [900, 70], words: [1000, 90], chars: [1100, 45], type: [1700, 60], scramble: [1300, 55],
+    wave: [1100, 45], zoom: [1000, 110], flip: [1100, 50], slide: [900, 90],
+  };
+  // Styles that move word by word (the rest move character by character).
+  const BY_WORD = new Set(["mask", "words", "zoom", "slide"]);
 
   function segments(text, granularity) {
     try { return [...new Intl.Segmenter("ja", { granularity }).segment(text)].map((part) => part.segment); } catch { return Array.from(text); }
@@ -71,7 +77,7 @@
   function unitsOf(text, mode) {
     const units = [];
     let carry = "";
-    for (const part of segments(text, mode === "mask" || mode === "words" ? "word" : "grapheme")) {
+    for (const part of segments(text, BY_WORD.has(mode) ? "word" : "grapheme")) {
       if (/^\s+$/.test(part)) {
         if (carry) { units.push(carry); carry = ""; }
         units.push({ space: part });
@@ -91,7 +97,7 @@
   function splitKinetic(el, mode) {
     if (el.classList.contains("hs-kin")) return el.querySelectorAll(".hs-k").length;
     const doc = el.ownerDocument;
-    const perChar = mode === "chars" || mode === "type" || mode === "scramble";
+    const perChar = !BY_WORD.has(mode);
     let n = 0;
     const wrap = (text) => {
       const frag = doc.createDocumentFragment();
@@ -198,6 +204,7 @@
       el.classList.remove("hs-in");
       el.classList.toggle("hs-hidden", click && Number(el.dataset.g) >= step);
     }
+    spotlight(slide, step);
     if (!animate || reduced()) return;
     kinetic(slide);
     void slide.offsetWidth;
@@ -208,8 +215,18 @@
     } else countWithin(slide);
   }
 
+  /** A spotlight build keeps everything on screen and puts group `step - 1` in focus (0: nothing in focus). */
+  function spotlight(slide, step) {
+    if (slide.dataset.build !== "spotlight") return false;
+    slide.classList.toggle("hs-spotting", step > 0);
+    for (const el of slide.querySelectorAll("[data-g]")) el.classList.toggle("hs-spot", Number(el.dataset.g) === step - 1);
+    return true;
+  }
+
   /** Show the next click step (1-based: step 1 shows group 0). */
   function reveal(slide, step) {
+    // In a spotlight build the item in focus counts its figure up again.
+    if (spotlight(slide, step)) { for (const el of slide.querySelectorAll(".hs-spot")) countWithin(el, 120); return; }
     for (const el of slide.querySelectorAll(`[data-g="${step - 1}"]`)) {
       el.classList.remove("hs-hidden", "hs-in");
       void el.getBoundingClientRect();
@@ -366,6 +383,17 @@
     const onMove = (event) => {
       const mark = event.target.closest?.(".hs-mark");
       if (mark && tip) showTip(mark, event);
+      // "Tilt" leans the item under the mouse towards it.
+      if (slide.dataset.hover === "tilt") {
+        const card = event.target.closest?.("[data-item]");
+        if (card && !(card instanceof SVGElement) && !card.closest(".hs-popover")) {
+          const r = card.getBoundingClientRect();
+          if (r.width && r.height) {
+            card.style.setProperty("--ry", `${(((event.clientX - r.left) / r.width - 0.5) * 12).toFixed(2)}deg`);
+            card.style.setProperty("--rx", `${((0.5 - (event.clientY - r.top) / r.height) * 10).toFixed(2)}deg`);
+          }
+        }
+      }
       const parallax = slide.querySelectorAll('.hs-media[data-motion="parallax"]');
       if (parallax.length) {
         const [x, y] = toSlide(slide, event.clientX, event.clientY);
@@ -462,8 +490,10 @@
 
   // ---------------------------------------------------------------- player
 
-  const TRANSITIONS = new Set(["none", "fade", "slide", "zoom", "morph", "wipe", "circle"]);
-  const TRANSITION_MS = { wipe: 920, circle: 920, drill: 560 };
+  const TRANSITIONS = new Set(Object.keys(E.TRANSITIONS));
+  const TRANSITION_MS = { wipe: 920, circle: 920, drill: 560, push: 680, flip: 940, dive: 860, blinds: 920, curtain: 920 };
+  // These clip the incoming slide itself, so edges and click points share the slide's own coordinates.
+  const CLIPPED = new Set(["wipe", "circle", "blinds", "curtain"]);
 
   /**
    * A presentation in `host` (the studio's presenter overlay or an exported file's body).
@@ -545,11 +575,14 @@
       const prevScaler = current;
       const prevSlide = prevScaler?.firstElementChild;
       if (prevSlide) { interaction?.destroy(); stopMedia(prevSlide); }
+      const from = index;
       index = i;
       const next = renderAt(i);
       const slide = next.firstElementChild;
       step = Math.min(atStep ?? (fullStep ? Infinity : 0), stepsOf(slide));
-      const type = reduced() || !prevScaler ? "none" : via || transition;
+      // A slide may have its own way in; going back plays the way in of the slide being left, in reverse.
+      const own = slides[dir < 0 ? from : i]?.transition;
+      const type = reduced() || !prevScaler ? "none" : via || (TRANSITIONS.has(own) ? own : transition);
       // A deep-dive page grows out of the item that opened it, and shrinks back into it.
       if (type === "drill" && at) for (const el of [next, prevScaler]) { el.style.setProperty("--ox", `${at.x}px`); el.style.setProperty("--oy", `${at.y}px`); }
       const enter = () => {
@@ -587,7 +620,7 @@
         const suffix = dir < 0 ? " rev" : "";
         // Wipe and circle clip the incoming slide itself, so the edge, its colour band and the click point
         // share the slide's own coordinates (letterboxing never shows them).
-        const entering = type === "wipe" || type === "circle" ? slide : next;
+        const entering = CLIPPED.has(type) ? slide : next;
         let band = null;
         if (type === "circle") {
           const box = slide.getBoundingClientRect();

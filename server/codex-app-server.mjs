@@ -119,10 +119,13 @@ const LAYOUT_GUIDE = [
   "- statement（大きな一文だけのスライド。問いかけ・決意・転換点に）: title（小見出し）, text（40字以内の一文。**語句** で1か所強調）",
   "- title: title, subtitle, date ／ section: title, takeaway ／ closing: title, message（次のアクション。2〜3個なら改行で区切ると番号付きの列になる）",
   "動き（HTML発表のときだけ効く。PowerPointの図形アニメーションとは別物）:",
-  "- animation: 項目の出し方。auto（レイアウトに合わせて自動。通常はこれ・省略可）/ click（クリックのたびに1項目ずつ。工程・計画を話しながら見せる）/ cascade（順番に自動）/ fade（まとめて）/ none",
-  "- photoMotion: 写真の動き。none / zoom（ゆっくり寄る）/ pan（ゆっくり横に流れる）/ float（ふわっと漂う）/ parallax（マウスに合わせて奥行き）。写真のあるスライドだけ",
-  "- kinetic（モーショングラフィック：大きな文字の動き）: auto（省略可。表紙・章扉・statement・hero・closing は資料の設定で自動的に動く）/ none / mask（下から立ち上がる。上品で汎用）/ words（ことばごとにぼかしから浮かぶ）/ chars（1文字ずつ弾む。研修・キックオフ向け）/ type（タイプライター。問いかけ・引用に）/ scramble（文字が入れ替わって決まる。テクノロジー・データの話題に）。本文スライドに付けるとタイトルが動く。資料全体で1〜2種類にそろえ、本文スライドには多用しない",
-  "- backdrop（モーショングラフィック：スライドの後ろで動く図形）: auto（省略可）/ none / particles（粒子が昇る）/ waves（波が流れる）/ grid（グリッドと走査線。データ・DX）/ orbits（軌道を回る。AI・テクノロジー・全体像）/ gradient（色がゆらぐ。ビジョン・未来）/ lines（線を光が流れる。つながり・流れ・データ連携）/ shapes（図形が漂う。研修・アイデア）。表紙・章扉・statement・closing に向く。本文の多いスライドには付けない。資料全体で同じ種類にそろえる",
+  "- animation: 項目の出し方。auto（レイアウトに合わせて自動。通常はこれ・省略可）/ click（クリックのたびに1項目ずつ。工程・計画を話しながら見せる）/ spotlight（順に注目。全部見せたまま、クリックのたびに1項目を強調しほかを薄くする。比較・選択肢・論点を1つずつ話すときに）/ cascade（順番に自動）/ fade（まとめて）/ none",
+  "- photoMotion: 写真の動き。none / zoom（ゆっくり寄る）/ pan（ゆっくり横に流れる）/ float（ふわっと漂う）/ parallax（マウスに合わせて奥行き）/ reveal（幕が開くように現れる）/ drift（斜めにゆっくり流れる）/ tilt（ゆっくり傾く）。写真のあるスライドだけ",
+  "- kinetic（モーショングラフィック：大きな文字の動き）: auto（省略可。表紙・章扉・statement・hero・closing は資料の設定で自動的に動く）/ none / mask（下から立ち上がる。上品で汎用）/ words（ことばごとにぼかしから浮かぶ）/ chars（1文字ずつ弾む。研修・キックオフ向け）/ type（タイプライター。問いかけ・引用に）/ scramble（文字が入れ替わって決まる。テクノロジー・データの話題に）/ wave（波打って並ぶ。明るい話題に）/ zoom（手前から迫る。決意・宣言に）/ flip（1文字ずつめくれる。発表・お披露目に）/ slide（横から滑り込む。スピード感・変化に）。本文スライドに付けるとタイトルが動く。資料全体で1〜2種類にそろえ、本文スライドには多用しない",
+  "- backdrop（モーショングラフィック：スライドの後ろで動く図形）: auto（省略可）/ none / particles（粒子が昇る）/ waves（波が流れる）/ grid（グリッドと走査線。データ・DX）/ orbits（軌道を回る。AI・テクノロジー・全体像）/ gradient（色がゆらぐ。ビジョン・未来）/ lines（線を光が流れる。つながり・流れ・データ連携）/ shapes（図形が漂う。研修・アイデア）/ confetti（紙吹雪。表彰・達成・お祝い）/ network（点と線がつながる。組織・連携・ネットワーク）/ ripple（波紋が広がる。影響・波及・浸透）/ stars（星がまたたく。夢・長期ビジョン）/ rays（光の筋が回る。発表・始動・幕開け）。表紙・章扉・statement・closing に向く。本文の多いスライドには付けない。資料全体で同じ種類にそろえる",
+  "- entrance（このスライドだけの登場のしかた。通常は省略して資料の設定に任せる）: auto / none / rise（下から浮かぶ）/ fade / blur / pop / slide（左から滑り込む）/ zoom（手前から迫る）/ flip（めくれる）/ wipe（幕が開く）/ drop（弾んで落ちる）。強く印象づけたい1〜2枚だけ",
+  "- emphasis（このスライドの **語句** の強調の見せ方。通常は省略）: auto / marker（マーカーを引く）/ underline（下線）/ circle（手書きの丸で囲む）/ box（枠で囲む）/ glow（光らせる）/ none（色だけ）",
+  "- transition（このスライドへ切り替わるときだけの動き。通常は省略して資料の設定に任せる）: auto / none / fade / slide / zoom / morph / wipe / circle / push（下から押し上げる）/ flip（カードのように裏返る）/ dive（奥へ飛び込む）/ blinds（ブラインドが開く）/ curtain（幕が中央から開く）。章の変わり目など、場面が変わる1〜2枚だけ",
   "- drillOf（深掘りページ）: このスライドを本編の流れから外し、直前の本編スライドの項目（items[1]、steps[0] など details の target と同じ書き方）をクリックしたときだけ開くページにする。本編の番号には数えず、発表中は Esc・← で元のスライドに戻る。1つの項目に深掘りページは1枚まで、深掘りページからさらに深掘りはしない。頼まれたときだけ作り、既存の drillOf のあるスライドは消さない・動かさない・drillOf を外さない",
   "- details（その項目をクリックすると開く補足カード）: [{target（項目の配列名と0始まりの番号。例: items[0]、steps[2]、milestones[1]、levels[0]、points[1]、branches[0]、leftItems[0]、stats[0]、rows[0]）, title（任意・20字以内）, text（120字以内）}]。スライドの本文は短いまま、話しながら見せたい根拠・具体例・内訳・数値の出所を text に書く（素材にない数値は書かない）。既存の details は頼まれない限りそのまま残す",
 ];
@@ -209,7 +212,7 @@ function memoLines(deck) {
   return memo ? ["", "この資料の前提条件（必ず守る）:", memo, ""] : [];
 }
 
-const THEME_LINE = "テーマ（見た目）: clarity=クリア（白地に深い青） / midnight=ミッドナイト（濃紺の舞台） / editorial=エディトリアル（明朝と朱） / mono=モノ（黒い罫線と赤） / forest=フォレスト（緑と黄土） / sunset=サンセット（コーラルと琥珀） / aurora=オーロラ（漂う光とガラス） / kinari=生成り（和の落ち着き）。切り替え: none / fade / slide / zoom / morph（見出しがつながって動く） / wipe（色の帯が横切る） / circle（クリックした所から円が広がる）";
+const THEME_LINE = "テーマ（見た目）: clarity=クリア（白地に深い青） / midnight=ミッドナイト（濃紺の舞台） / editorial=エディトリアル（明朝と朱） / mono=モノ（黒い罫線と赤） / forest=フォレスト（緑と黄土） / sunset=サンセット（コーラルと琥珀） / aurora=オーロラ（漂う光とガラス） / kinari=生成り（和の落ち着き）。切り替え: none / fade / slide / zoom / morph（見出しがつながって動く） / wipe（色の帯が横切る） / circle（クリックした所から円が広がる） / push（下から押し上げる） / flip（カードのように裏返る） / dive（奥へ飛び込む） / blinds（ブラインドが開く） / curtain（幕が中央から開く）";
 
 export function buildChatPrompt({ deck, message, history = [], current = 0, focus = [], attachment = null }) {
   const slides = withoutImageData(deck.slides ?? []);
@@ -230,12 +233,12 @@ export function buildChatPrompt({ deck, message, history = [], current = 0, focu
     "- order: スライドの順番を入れ替えるときだけ、元の枚数を新しい順に並べた配列（削除したものは除く）。入れ替えないなら省略",
     "- deckTitle: 資料名の変更を頼まれたときだけ",
     "- theme / transition: 見た目のテーマやスライドの切り替えの変更を頼まれたときだけ（下の一覧から選ぶ）",
-    "- motion: 資料全体の動き（モーショングラフィック）の変更を頼まれたときだけ。kinetic（表紙・章扉などの大きな文字の動き）/ backdrop（表紙・章扉・statement・最後のスライドの後ろで動く図形）/ draw（アイコン・線・マーカーを描くように見せるか）。1枚だけなら、そのスライドの kinetic・backdrop を変える",
+    "- motion: 資料全体の動き（モーショングラフィック）の変更を頼まれたときだけ。変えるものだけ入れる。entrance（全スライドの登場のしかた）/ hover（項目にマウスを乗せたときの反応: lift・focus・tilt・glow・zoom）/ kinetic（表紙・章扉などの大きな文字の動き）/ backdrop（表紙・章扉・statement・最後のスライドの後ろで動く図形）/ emphasis（**語句** の強調の見せ方）/ draw（アイコン・線・マーカーを描くように見せるか）。1枚だけなら、そのスライドの entrance・kinetic・backdrop・emphasis・transition を変える",
     "- suggestions: ユーザーが次に頼みそうな改善を最大3つ。20字以内の依頼文（例：「結論を1枚目に寄せて」「工程をクリックで1つずつ出して」）",
     "- 頼まれていないスライドは変えない。直すときは必要最小限にする",
     "- 変更前に、資料の目的→各スライドの役割→対象スライドの主張と根拠→前後とのつながりを確認する。本文を読まずに見出しだけで判断しない",
     "- 指示が曖昧でも、現在のスライドと直近の会話から対象を特定する。明確な対象がない場合は勝手に広げず、質問する",
-    "- 「動きをつけて」「クリックで詳しく」「写真を動かして」などは animation・details・photoMotion で応える。「モーショングラフィック」「文字を動かして」「背景を動かして」「もっと派手に」は kinetic・backdrop（1枚なら各スライド、全体なら motion）で応える。動画やLottieアニメーションはユーザーが画面の「写真・動画・アニメーション」から追加するもので、あなたは入れられない",
+    "- 「動きをつけて」「クリックで詳しく」「写真を動かして」などは animation・details・photoMotion で応える。「モーショングラフィック」「文字を動かして」「背景を動かして」「もっと派手に」は kinetic・backdrop・entrance（1枚なら各スライド、全体なら motion）で応える。「1つずつ注目させて」は animation の spotlight、「強調を丸で囲んで」などは emphasis、「このスライドだけ切り替えを変えて」はそのスライドの transition で応える。動画やLottieアニメーションはユーザーが画面の「写真・動画・アニメーション」から追加するもので、あなたは入れられない",
     "- 写真は、ユーザーが明示的に求めたときだけ新規選択・変更する。見た目を良くする依頼でも、無関係な素材を足さずレイアウト・余白・情報の強弱を優先する",
     "- 1枚目は title、最後は closing のままにする。表紙と最後は削除・移動しない",
     "- 「〇〇を深掘りするページを作って」「クリックで詳しいページに飛べるように」と頼まれたら、元のスライドの後ろに insert し、content に drillOf（元のスライドの項目。例: items[1]）を入れる。本文はその項目の背景・内訳・具体例・根拠で、元のスライドの繰り返しにしない。drillOf のあるスライド（深掘りページ）は本編の流れに入らないので、順番の入れ替えや枚数の話では数えない",
@@ -243,7 +246,7 @@ export function buildChatPrompt({ deck, message, history = [], current = 0, focu
     "- 新しい画像は生成できない。既存の写真を選ぶことと画像生成を混同せず、生成したと説明しない",
     "- 本文スライドには結論を一文で言い切る takeaway を入れる。文字数の上限を守る",
     ...memoLines(deck),
-    `資料: ${deck.title ?? ""}（対象者: ${deck.audience || "未指定"}、目的: ${deck.purpose || "未指定"}、全${total}枚、テーマ: ${deck.theme || "clarity"}、切り替え: ${deck.transition || "fade"}、大きな文字の動き: ${deck.motion?.kinetic || "mask"}、背景の動き: ${deck.motion?.backdrop || "none"}）`,
+    `資料: ${deck.title ?? ""}（対象者: ${deck.audience || "未指定"}、目的: ${deck.purpose || "未指定"}、全${total}枚、テーマ: ${deck.theme || "clarity"}、切り替え: ${deck.transition || "fade"}、登場: ${deck.motion?.entrance || "rise"}、大きな文字の動き: ${deck.motion?.kinetic || "mask"}、背景の動き: ${deck.motion?.backdrop || "none"}、強調: ${deck.motion?.emphasis || "marker"}）`,
     `ユーザーが今見ているスライド: ${current + 1}枚目${targets.length ? `／ユーザーが指定したスライド: ${targets.map((n) => `${n}枚目`).join("、")}` : ""}`,
     "「この1枚」「このスライド」は今見ているスライドを指す。",
     "資料全体の骨子（各枚の役割・主張・根拠。対象の前後は詳しく示す）:",
@@ -497,7 +500,7 @@ export function buildRewritePrompt({ deck, instruction, settings = {} }) {
     "「[画像あり]」「[写真・動画あり]」と書かれた値は写真・動画なので、そのまま残す（別の文字に書き換えない）。",
     `文字量: ${density.label}（${density.rule}）`,
     `対象者: ${deck.audience || "未指定"} ／ 目的: ${deck.purpose || "未指定"}`,
-    "各本文スライドの takeaway と notes を保つか改善する。指示に関係しない良い部分は無理に変えない。details・animation・photoMotion・kinetic・backdrop は指示がなければ残す。",
+    "各本文スライドの takeaway と notes を保つか改善する。指示に関係しない良い部分は無理に変えない。details・animation・photoMotion・kinetic・backdrop・entrance・emphasis・transition は指示がなければ残す。",
     "資料の主張と前後の流れを先に読み、修正後も根拠から結論へのつながりを保つ。写真は見た目の穴埋めに追加せず、個々のスライドの本文と具体的に合うものだけにする。",
     "",
     ...LAYOUT_GUIDE,

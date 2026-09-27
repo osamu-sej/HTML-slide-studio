@@ -729,12 +729,26 @@ li > .hs-detail-badge, li > .hs-drill-badge { top: 50%; right: 0; transform: tra
 @keyframes hs-drift-b { 0%, 100% { transform: translate(0, 0); } 50% { transform: translate(90px, -110px); } }
 @keyframes hs-spin { to { transform: rotate(360deg); } }
 @keyframes hs-pop-in { from { opacity: 0; transform: translateY(24px) scale(.96); } to { opacity: 1; transform: none; } }
+/* more ways in: slide from the left, come forward, flip down, open like a curtain, drop and bounce */
+@keyframes hs-slide-in { from { opacity: 0; transform: translateX(-90px); } to { opacity: 1; transform: none; } }
+@keyframes hs-zoom-in { from { opacity: 0; transform: scale(1.22); filter: blur(8px); } to { opacity: 1; transform: none; filter: none; } }
+@keyframes hs-flip-in { from { opacity: 0; transform: perspective(1400px) rotateX(-75deg); } to { opacity: 1; transform: none; } }
+@keyframes hs-wipe-in { from { clip-path: inset(-120px 100% -120px -120px); } to { clip-path: inset(-120px -120px -120px -120px); } }
+@keyframes hs-drop-in { 0% { opacity: 0; transform: translateY(-80px); } 55% { opacity: 1; transform: translateY(12px); } 78% { transform: translateY(-5px); } 100% { opacity: 1; transform: none; } }
+/* more photo motion: drift across, lean in 3D, open like a curtain */
+@keyframes hs-photo-drift { from { transform: scale(1.16) translate(-3%, 2%); } to { transform: scale(1.16) translate(3%, -2%); } }
+@keyframes hs-photo-tilt { 0%, 100% { transform: perspective(1600px) rotateY(-5deg) rotateX(2deg) scale(1.14); } 50% { transform: perspective(1600px) rotateY(5deg) rotateX(-2deg) scale(1.14); } }
+@keyframes hs-photo-reveal { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
 
 /* photo motion runs wherever the slide is shown (thumbnails excepted) */
 .hs-slide:not(.hs-static) .hs-media[data-motion="zoom"] > img, .hs-slide:not(.hs-static) .hs-media[data-motion="zoom"] > video { animation: hs-kenburns 16s ease-in-out infinite alternate; }
 .hs-slide:not(.hs-static) .hs-media[data-motion="pan"] > img, .hs-slide:not(.hs-static) .hs-media[data-motion="pan"] > video { animation: hs-pan 18s ease-in-out infinite alternate; }
 .hs-slide:not(.hs-static) .hs-media[data-motion="float"] > img { animation: hs-float 9s ease-in-out infinite; }
 .hs-media[data-motion="parallax"] > img { transform: scale(1.1) translate(var(--px, 0), var(--py, 0)); transition: transform .6s var(--ease-out); }
+.hs-slide:not(.hs-static) .hs-media[data-motion="drift"] > img, .hs-slide:not(.hs-static) .hs-media[data-motion="drift"] > video { animation: hs-photo-drift 20s ease-in-out infinite alternate; }
+.hs-slide:not(.hs-static) .hs-media[data-motion="tilt"] > img, .hs-slide:not(.hs-static) .hs-media[data-motion="tilt"] > video { animation: hs-photo-tilt 14s ease-in-out infinite; }
+.hs-slide:not(.hs-static) .hs-media[data-motion="reveal"] > img, .hs-slide:not(.hs-static) .hs-media[data-motion="reveal"] > video { animation: hs-kenburns 18s ease-in-out infinite alternate; }
+.hs-slide.hs-play .hs-media[data-motion="reveal"] { animation: hs-photo-reveal 1.3s cubic-bezier(.77, 0, .18, 1) .15s both; }
 .hs-slide:not(.hs-static)[data-ambient="on"][data-theme="aurora"] .hs-decor i:nth-child(1) { animation: hs-drift-a 22s ease-in-out infinite; }
 .hs-slide:not(.hs-static)[data-ambient="on"][data-theme="aurora"] .hs-decor i:nth-child(2) { animation: hs-drift-b 26s ease-in-out infinite; }
 .hs-slide:not(.hs-static)[data-ambient="on"][data-theme="aurora"] .hs-decor i:nth-child(3) { animation: hs-drift-a 30s ease-in-out infinite reverse; }
@@ -750,12 +764,24 @@ li > .hs-detail-badge, li > .hs-drill-badge { top: 50%; right: 0; transform: tra
 .hs-slide[data-entrance="blur"] { --hs-in: hs-blur; }
 .hs-slide[data-entrance="pop"] { --hs-in: hs-pop; }
 .hs-slide[data-entrance="none"] { --hs-in: none; }
+.hs-slide[data-entrance="slide"] { --hs-in: hs-slide-in; }
+.hs-slide[data-entrance="zoom"] { --hs-in: hs-zoom-in; }
+.hs-slide[data-entrance="flip"] { --hs-in: hs-flip-in; }
+.hs-slide[data-entrance="wipe"] { --hs-in: hs-wipe-in; }
+.hs-slide[data-entrance="drop"] { --hs-in: hs-drop-in; }
+.hs-slide[data-entrance="flip"] :is(.hs-head > *, .hs-enter, [data-g]) { transform-origin: 50% 0; }
 .hs-slide.hs-play [data-g] { animation: var(--hs-in, hs-rise) .7s var(--ease-out) both; animation-delay: .32s; }
 .hs-slide.hs-play[data-build="cascade"] [data-g] { animation-delay: calc(var(--g) * 170ms + .36s); }
 .hs-slide.hs-play[data-build="click"] [data-g] { animation: none; }
 .hs-slide [data-g].hs-hidden { visibility: hidden; }
 .hs-slide [data-g].hs-in { animation: var(--hs-in, hs-rise) .6s var(--ease-out) both !important; }
 .hs-slide[data-build="none"].hs-play [data-g] { animation: none; }
+/* spotlight: all items arrive together; each click brings one forward and lets the others step back.
+   (The entrance does not hold its end state, so the dimming below can take over.) */
+.hs-slide.hs-play[data-build="spotlight"] [data-g] { animation-fill-mode: backwards; }
+.hs-slide[data-build="spotlight"] [data-g] { transition: opacity .5s var(--ease-out), filter .5s var(--ease-out), transform .5s var(--ease-out); }
+.hs-slide[data-build="spotlight"].hs-spotting [data-g]:not(.hs-spot) { opacity: .22; filter: grayscale(.7); }
+.hs-slide[data-build="spotlight"].hs-spotting .hs-spot:not(svg *):not(tr) { transform: scale(1.03); }
 
 /* data motion: bars grow, lines draw, arcs sweep (only when the group is shown) */
 .hs-slide.hs-numbers.hs-play .hs-bar, .hs-slide.hs-numbers [data-g].hs-in .hs-bar { animation: hs-grow-y .9s var(--ease-out) both; animation-delay: calc(var(--i, 0) * 70ms + .45s); transform-box: fill-box; transform-origin: 50% 100%; }
@@ -772,6 +798,13 @@ li > .hs-detail-badge, li > .hs-drill-badge { top: 50%; right: 0; transform: tra
 .hs-slide.hs-live[data-hover="lift"] .hs-seg.hs-hot { stroke-width: 96px; }
 .hs-slide.hs-live[data-hover="focus"] .hs-has-hot .hs-item:not(.hs-hot) { opacity: .35; }
 .hs-slide.hs-live[data-hover="focus"] .hs-item { transition: opacity .3s; }
+/* tilt leans the item towards the mouse (motion.js sets --rx/--ry); glow rings it with light; zoom brings it closer */
+.hs-slide.hs-live:is([data-hover="tilt"], [data-hover="glow"], [data-hover="zoom"]) .hs-item { transition: transform .3s var(--ease-out), box-shadow .35s var(--ease-out), background-color .35s, filter .35s; }
+.hs-slide.hs-live[data-hover="tilt"] .hs-item.hs-hot:not(svg *):not(tr) { transform: perspective(1000px) rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg)) scale(1.03); box-shadow: 0 30px 70px color-mix(in srgb, var(--ink) 16%, transparent); }
+.hs-slide.hs-live[data-hover="glow"] .hs-item.hs-hot:not(svg *):not(tr) { box-shadow: 0 0 0 3px var(--accent), 0 0 56px color-mix(in srgb, var(--accent) 45%, transparent); }
+.hs-slide.hs-live[data-hover="glow"] svg .hs-item.hs-hot { filter: drop-shadow(0 0 16px color-mix(in srgb, var(--accent) 70%, transparent)); }
+.hs-slide.hs-live[data-hover="zoom"] .hs-item.hs-hot:not(svg *):not(tr) { transform: scale(1.05); }
+.hs-slide.hs-live:is([data-hover="tilt"], [data-hover="glow"], [data-hover="zoom"]) tr.hs-item.hs-hot { background: var(--accent-soft); }
 .hs-slide.hs-live .hs-media.hs-lean > img { transition: transform .8s var(--ease-out); }
 .hs-slide.hs-live .hs-media.hs-lean:hover > img { transform: scale(1.06); }
 .hs-slide.hs-live .hs-mark { transition: opacity .25s; }
@@ -786,7 +819,7 @@ li > .hs-detail-badge, li > .hs-drill-badge { top: 50%; right: 0; transform: tra
 .hs-bd i, .hs-bd b { position: absolute; display: block; }
 .hs-slide:not(.hs-stage) .hs-bd { opacity: .55; }
 /* graphics that sweep across the whole slide fade out where the text starts (left) */
-.hs-bd[data-bd="orbits"], .hs-bd[data-bd="lines"] { -webkit-mask-image: linear-gradient(90deg, transparent 18%, #000 58%); mask-image: linear-gradient(90deg, transparent 18%, #000 58%); }
+.hs-bd:is([data-bd="orbits"], [data-bd="lines"], [data-bd="network"], [data-bd="ripple"]) { -webkit-mask-image: linear-gradient(90deg, transparent 18%, #000 58%); mask-image: linear-gradient(90deg, transparent 18%, #000 58%); }
 
 .hs-bd[data-bd="particles"] i { border-radius: 50%; background: var(--accent); opacity: var(--o); }
 .hs-bd[data-bd="particles"] i.c2 { background: var(--accent2); }
@@ -857,6 +890,52 @@ li > .hs-detail-badge, li > .hs-drill-badge { top: 50%; right: 0; transform: tra
 .hs-slide:not(.hs-static) .hs-bd-shape { animation: hs-bd-bob var(--t) ease-in-out var(--dl) infinite alternate; }
 @keyframes hs-bd-bob { from { transform: translateY(-22px) rotate(var(--rot)); } to { transform: translateY(22px) rotate(calc(var(--rot) + 48deg)); } }
 
+/* confetti: pieces tumble down from above (spread by their negative delays); --y only places them for still pictures */
+.hs-bd-conf { top: var(--y); width: 14px; height: 32px; border-radius: 3px; opacity: .85; background: var(--accent); transform: rotate(var(--rot)); }
+.hs-bd-conf.square { width: 20px; height: 20px; }
+.hs-bd-conf.dot { width: 16px; height: 16px; border-radius: 50%; }
+.hs-bd-conf.c2 { background: var(--accent2); }
+.hs-bd-conf.c3 { background: var(--c3); }
+.hs-bd-conf.c4 { background: var(--c4); }
+.hs-bd-conf.c5 { background: var(--c5); }
+.hs-slide:not(.hs-static) .hs-bd-conf { top: -60px; animation: hs-bd-fall var(--t) linear var(--dl) infinite; }
+@keyframes hs-bd-fall { from { transform: translate(0, 0) rotate(var(--rot)) rotateX(0deg); } to { transform: translate(var(--sway), 1220px) rotate(calc(var(--rot) + var(--spin) / 3)) rotateX(var(--spin)); } }
+
+/* network: ties between nodes carry travelling light; the hubs breathe */
+.hs-bd[data-bd="network"] svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.hs-bd[data-bd="network"] .edge { fill: none; stroke: var(--ink); stroke-opacity: .14; stroke-width: 2px; }
+.hs-bd[data-bd="network"] .pulse { fill: none; stroke: var(--accent); stroke-opacity: .85; stroke-width: 4px; stroke-linecap: round; stroke-dasharray: 12 88; stroke-dashoffset: 100; }
+.hs-bd[data-bd="network"] .node { fill: var(--accent); fill-opacity: .75; }
+.hs-bd[data-bd="network"] .hub { fill-opacity: 1; stroke: color-mix(in srgb, var(--accent) 25%, transparent); stroke-width: 16px; }
+.hs-slide:not(.hs-static) .hs-bd[data-bd="network"] .pulse { animation: hs-bd-run var(--t) linear var(--dl) infinite; }
+.hs-slide:not(.hs-static) .hs-bd[data-bd="network"] .hub { animation: hs-bd-breathe 3.2s ease-in-out var(--dl) infinite; transform-box: fill-box; transform-origin: center; }
+@keyframes hs-bd-run { from { stroke-dashoffset: 100; } to { stroke-dashoffset: 0; } }
+
+/* ripple: rings spread from one point on the right */
+.hs-bd-ripple { position: absolute; left: 1400px; top: 560px; width: 0; height: 0; }
+.hs-bd-ripple i { left: -520px; top: -520px; width: 1040px; height: 1040px; border-radius: 50%; border: 3px solid var(--accent); opacity: calc(.55 - var(--i) * .1); transform: scale(calc(.18 + var(--i) * .2)); }
+.hs-bd-ripple b { left: -22px; top: -22px; width: 44px; height: 44px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 14px color-mix(in srgb, var(--accent) 20%, transparent); }
+.hs-slide:not(.hs-static) .hs-bd-ripple i { animation: hs-bd-ripple 8.5s cubic-bezier(.2, .6, .4, 1) var(--dl) infinite; }
+.hs-slide:not(.hs-static) .hs-bd-ripple b { animation: hs-bd-breathe 2.8s ease-in-out infinite; }
+@keyframes hs-bd-ripple { from { transform: scale(.06); opacity: .75; } to { transform: scale(1.25); opacity: 0; } }
+
+/* stars: points twinkle and, now and then, one shoots across */
+.hs-bd-star { width: 4px; height: 4px; border-radius: 50%; background: var(--accent); opacity: var(--o); }
+.hs-bd-star.big { width: 7px; height: 7px; box-shadow: 0 0 14px 3px color-mix(in srgb, var(--accent) 45%, transparent); }
+.hs-bd-shoot { width: 220px; height: 3px; border-radius: 3px; background: linear-gradient(90deg, var(--accent), transparent); opacity: 0; transform: rotate(-32deg); }
+.hs-slide[data-tone="dark"] .hs-bd-star { background: #fff; }
+.hs-slide[data-tone="dark"] .hs-bd-star.big { box-shadow: 0 0 14px 3px rgba(255, 255, 255, .45); }
+.hs-slide[data-tone="dark"] .hs-bd-shoot { background: linear-gradient(90deg, #fff, transparent); }
+.hs-slide:not(.hs-static) .hs-bd-star { animation: hs-bd-twinkle var(--t) ease-in-out var(--dl) infinite; }
+.hs-slide:not(.hs-static) .hs-bd-shoot { animation: hs-bd-shoot 9s ease-in var(--dl) infinite; }
+@keyframes hs-bd-twinkle { 0%, 100% { opacity: calc(var(--o) * .25); transform: scale(.7); } 50% { opacity: var(--o); transform: scale(1.15); } }
+@keyframes hs-bd-shoot { 0%, 84% { opacity: 0; transform: rotate(-32deg) translateX(0); } 86% { opacity: 1; } 100% { opacity: 0; transform: rotate(-32deg) translateX(-560px); } }
+
+/* rays: a slow sunburst from the lower right */
+.hs-bd-rays { position: absolute; left: 1560px; top: 980px; width: 3400px; height: 3400px; margin: -1700px 0 0 -1700px; border-radius: 50%; background: repeating-conic-gradient(color-mix(in srgb, var(--accent) 18%, transparent) 0deg 4deg, transparent 6deg 15deg); -webkit-mask-image: radial-gradient(circle closest-side, #000 0%, transparent 72%); mask-image: radial-gradient(circle closest-side, #000 0%, transparent 72%); }
+.hs-slide[data-tone="dark"] .hs-bd-rays { background: repeating-conic-gradient(color-mix(in srgb, var(--accent) 26%, transparent) 0deg 4deg, transparent 6deg 15deg); }
+.hs-slide:not(.hs-static) .hs-bd-rays { animation: hs-spin 140s linear infinite; }
+
 /* ---- kinetic type: motion.js splits the big lines into units (.hs-k) when the slide plays */
 .hs-kin .hs-k { display: inline-block; }
 .hs-kin .hs-km { display: inline-block; overflow: hidden; vertical-align: bottom; padding: 0 .03em .12em; margin: 0 -.03em -.12em; }
@@ -877,6 +956,14 @@ li > .hs-detail-badge, li > .hs-drill-badge { top: 50%; right: 0; transform: tra
 @keyframes hs-k-type { from { opacity: 0; } to { opacity: 1; } }
 @keyframes hs-k-caret { 0%, 99% { box-shadow: .07em 0 0 0 var(--accent); } 100% { box-shadow: .07em 0 0 0 transparent; } }
 @keyframes hs-k-blink { 0%, 49% { box-shadow: .07em 0 0 0 var(--accent); } 50%, 100% { box-shadow: .07em 0 0 0 transparent; } }
+.hs-slide.hs-play[data-kinetic="wave"] .hs-kin .hs-k { animation-name: hs-k-wave; animation-duration: 1s; animation-timing-function: ease-out; animation-fill-mode: both; }
+.hs-slide.hs-play[data-kinetic="zoom"] .hs-kin .hs-k { animation-name: hs-k-zoom; animation-duration: .85s; animation-timing-function: var(--ease-out); animation-fill-mode: both; }
+.hs-slide.hs-play[data-kinetic="flip"] .hs-kin .hs-k { animation-name: hs-k-flip; animation-duration: .8s; animation-timing-function: cubic-bezier(.3, 1.4, .5, 1); animation-fill-mode: both; transform-origin: 50% 80%; }
+.hs-slide.hs-play[data-kinetic="slide"] .hs-kin .hs-k { animation-name: hs-k-slide; animation-duration: .8s; animation-timing-function: var(--ease-out); animation-fill-mode: both; }
+@keyframes hs-k-wave { 0% { opacity: 0; transform: translateY(.7em); } 45% { opacity: 1; transform: translateY(-.22em); } 72% { transform: translateY(.06em); } 100% { opacity: 1; transform: none; } }
+@keyframes hs-k-zoom { from { opacity: 0; transform: scale(2.4); filter: blur(10px); } to { opacity: 1; transform: none; filter: none; } }
+@keyframes hs-k-flip { from { opacity: 0; transform: perspective(500px) rotateX(-100deg); } 55% { opacity: 1; } to { opacity: 1; transform: none; } }
+@keyframes hs-k-slide { from { opacity: 0; transform: translateX(1.2em); filter: blur(6px); } to { opacity: 1; transform: none; filter: none; } }
 /* the takeaway under a kinetic title waits for it */
 .hs-slide.hs-play[data-kinetic] .hs-head > .hs-takeaway { animation-delay: .45s; }
 /* gradient titles (Aurora) paint the gradient on each unit, since moving pieces leave the parent's text clip */
@@ -898,9 +985,45 @@ li > .hs-detail-badge, li > .hs-drill-badge { top: 50%; right: 0; transform: tra
 .hs-slide[data-draw="on"].hs-play .hs-org-stem { animation: hs-grow-y .5s var(--ease-out) both; animation-delay: .35s; transform-origin: 50% 0; }
 .hs-slide[data-draw="on"].hs-play .hs-org-row::before { animation: hs-grow-x .8s var(--ease-out) both; animation-delay: .6s; }
 .hs-slide[data-draw="on"].hs-play .hs-eyebrow::before, .hs-slide[data-draw="on"].hs-play .hs-closing-title::before { animation: hs-grow-x .8s var(--ease-out) both; animation-delay: .2s; transform-origin: 0 50%; }
-.hs-slide[data-draw="on"].hs-play:not([data-build="click"]) .hs-em, .hs-slide[data-draw="on"].hs-play .hs-head .hs-em, .hs-slide[data-draw="on"].hs-play .hs-enter .hs-em { background-repeat: no-repeat; animation: hs-marker-a .9s var(--ease-out) both; animation-delay: calc(var(--g, 0) * 170ms + .85s); }
-.hs-slide[data-draw="on"].hs-play .hs-kin .hs-em { animation-delay: calc(var(--kd, 0ms) + var(--kn, 8) * var(--kst, 60ms) + .3s); }
-.hs-slide[data-draw="on"] [data-g].hs-in .hs-em { background-repeat: no-repeat; animation: hs-marker-b .8s var(--ease-out) both; animation-delay: .35s; }
+
+/* ---- emphasis: how the one **phrase** is set off — marker (default), underline, a hand-drawn circle, a box,
+   a glow, or colour alone — and, with "draw" on, how that mark arrives (--emd: when). */
+@property --hs-a { syntax: "<angle>"; inherits: false; initial-value: 360deg; }
+.hs-slide[data-emphasis="none"] .hs-em { background: none; border-bottom: 0; }
+.hs-slide[data-emphasis="underline"] .hs-em { background: linear-gradient(currentColor, currentColor) no-repeat 0 100% / 100% .09em; border-bottom: 0; padding-bottom: .03em; }
+.hs-slide[data-emphasis="glow"] .hs-em { background: none; border-bottom: 0; text-shadow: 0 0 .45em color-mix(in srgb, currentColor 50%, transparent); }
+.hs-slide:is([data-emphasis="circle"], [data-emphasis="box"]) .hs-em { position: relative; background: none; border-bottom: 0; }
+.hs-slide:is([data-emphasis="circle"], [data-emphasis="box"]) .hs-em::after { content: ""; position: absolute; pointer-events: none; }
+/* The circle is an ellipse with uneven edges, turned a little, so it reads as drawn by hand (a border, not a mask
+   image: a scaled-down mask image leaves a hairline at its edge). */
+.hs-slide[data-emphasis="circle"] .hs-em::after {
+  inset: -.36em -.46em -.32em -.38em; border: solid currentColor; border-width: .06em .1em .085em .065em;
+  border-radius: 52% 48% 55% 45% / 50% 55% 45% 50%; transform: rotate(-2.5deg);
+  -webkit-mask: conic-gradient(#000 var(--hs-a, 360deg), transparent 0); mask: conic-gradient(#000 var(--hs-a, 360deg), transparent 0);
+}
+.hs-slide[data-emphasis="box"] .hs-em::after { inset: -.12em -.2em -.08em; border: .075em solid currentColor; border-radius: .16em; -webkit-mask: conic-gradient(#000 var(--hs-a, 360deg), transparent 0); mask: conic-gradient(#000 var(--hs-a, 360deg), transparent 0); }
+@keyframes hs-uline-a { from { background-size: 0% .09em; } to { background-size: 100% .09em; } }
+@keyframes hs-uline-b { from { background-size: 0% .09em; } to { background-size: 100% .09em; } }
+@keyframes hs-ring-a { from { --hs-a: 0deg; } to { --hs-a: 360deg; } }
+@keyframes hs-ring-b { from { --hs-a: 0deg; } to { --hs-a: 360deg; } }
+@keyframes hs-glow-a { 0% { text-shadow: 0 0 0 transparent; } 40% { text-shadow: 0 0 .9em currentColor; } 100% { text-shadow: 0 0 .45em color-mix(in srgb, currentColor 50%, transparent); } }
+@keyframes hs-glow-b { 0% { text-shadow: 0 0 0 transparent; } 40% { text-shadow: 0 0 .9em currentColor; } 100% { text-shadow: 0 0 .45em color-mix(in srgb, currentColor 50%, transparent); } }
+/* when: after its group arrives (or after a kinetic line finishes); on a click build, when its item is revealed */
+.hs-slide[data-draw="on"].hs-play:not([data-build="click"]) .hs-em, .hs-slide[data-draw="on"].hs-play :is(.hs-head, .hs-enter) .hs-em { --emd: calc(var(--g, 0) * 170ms + .85s); }
+.hs-slide[data-draw="on"].hs-play .hs-kin .hs-em { --emd: calc(var(--kd, 0ms) + var(--kn, 8) * var(--kst, 60ms) + .3s); }
+.hs-slide[data-draw="on"] [data-g].hs-in .hs-em { --emd: .35s; }
+.hs-slide[data-draw="on"][data-emphasis="marker"].hs-play:not([data-build="click"]) .hs-em,
+.hs-slide[data-draw="on"][data-emphasis="marker"].hs-play :is(.hs-head, .hs-enter) .hs-em { background-repeat: no-repeat; animation: hs-marker-a .9s var(--ease-out) var(--emd) both; }
+.hs-slide[data-draw="on"][data-emphasis="marker"] [data-g].hs-in .hs-em { background-repeat: no-repeat; animation: hs-marker-b .8s var(--ease-out) var(--emd) both; }
+.hs-slide[data-draw="on"][data-emphasis="underline"].hs-play:not([data-build="click"]) .hs-em,
+.hs-slide[data-draw="on"][data-emphasis="underline"].hs-play :is(.hs-head, .hs-enter) .hs-em { animation: hs-uline-a .8s var(--ease-out) var(--emd) both; }
+.hs-slide[data-draw="on"][data-emphasis="underline"] [data-g].hs-in .hs-em { animation: hs-uline-b .7s var(--ease-out) var(--emd) both; }
+.hs-slide[data-draw="on"][data-emphasis="glow"].hs-play:not([data-build="click"]) .hs-em,
+.hs-slide[data-draw="on"][data-emphasis="glow"].hs-play :is(.hs-head, .hs-enter) .hs-em { animation: hs-glow-a 1.6s ease-out var(--emd) both; }
+.hs-slide[data-draw="on"][data-emphasis="glow"] [data-g].hs-in .hs-em { animation: hs-glow-b 1.4s ease-out var(--emd) both; }
+.hs-slide[data-draw="on"]:is([data-emphasis="circle"], [data-emphasis="box"]).hs-play:not([data-build="click"]) .hs-em::after,
+.hs-slide[data-draw="on"]:is([data-emphasis="circle"], [data-emphasis="box"]).hs-play :is(.hs-head, .hs-enter) .hs-em::after { animation: hs-ring-a .9s var(--ease-in-out) var(--emd) both; }
+.hs-slide[data-draw="on"]:is([data-emphasis="circle"], [data-emphasis="box"]) [data-g].hs-in .hs-em::after { animation: hs-ring-b .8s var(--ease-in-out) var(--emd) both; }
 
 @media (prefers-reduced-motion: reduce) {
   .hs-slide *, .hs-slide *::before, .hs-slide *::after { animation: none !important; transition: none !important; }
@@ -977,6 +1100,42 @@ li > .hs-detail-badge, li > .hs-drill-badge { top: 50%; right: 0; transform: tra
 .hs-tr-out-wipe, .hs-tr-out-circle { animation: hs-tr-dim .9s ease both; }
 .hs-tr-band { position: absolute; top: 0; bottom: 0; width: 12%; z-index: 40; pointer-events: none; background: linear-gradient(90deg, var(--band, #2451e6) 0 70%, var(--band2, #13a89e) 70% 100%); animation: hs-tr-band .9s cubic-bezier(.65, 0, .35, 1) both; }
 .hs-tr-band.rev { background: linear-gradient(90deg, var(--band2, #13a89e) 0 30%, var(--band, #2451e6) 30% 100%); animation-name: hs-tr-band-rev; }
+/* push: the next slide pushes this one up (down when going back) */
+@keyframes hs-tr-push-in { from { transform: translateY(100%); } to { transform: none; } }
+@keyframes hs-tr-push-out { from { transform: none; } to { transform: translateY(-100%); } }
+@keyframes hs-tr-push-in-rev { from { transform: translateY(-100%); } to { transform: none; } }
+@keyframes hs-tr-push-out-rev { from { transform: none; } to { transform: translateY(100%); } }
+.hs-tr-in-push { animation: hs-tr-push-in .66s cubic-bezier(.65, 0, .35, 1) both; }
+.hs-tr-out-push { animation: hs-tr-push-out .66s cubic-bezier(.65, 0, .35, 1) both; }
+.hs-tr-in-push.rev { animation-name: hs-tr-push-in-rev; }
+.hs-tr-out-push.rev { animation-name: hs-tr-push-out-rev; }
+/* flip: the slide turns over like a card — this one turns away, the next turns in */
+@keyframes hs-tr-flip-out { from { transform: perspective(2600px) rotateY(0deg); } to { transform: perspective(2600px) rotateY(-90deg); } }
+@keyframes hs-tr-flip-in { from { transform: perspective(2600px) rotateY(90deg); } to { transform: perspective(2600px) rotateY(0deg); } }
+@keyframes hs-tr-flip-out-rev { from { transform: perspective(2600px) rotateY(0deg); } to { transform: perspective(2600px) rotateY(90deg); } }
+@keyframes hs-tr-flip-in-rev { from { transform: perspective(2600px) rotateY(-90deg); } to { transform: perspective(2600px) rotateY(0deg); } }
+.hs-tr-out-flip { animation: hs-tr-flip-out .44s cubic-bezier(.55, 0, 1, .45) both; }
+.hs-tr-in-flip { animation: hs-tr-flip-in .48s cubic-bezier(0, .55, .45, 1) .44s both; }
+.hs-tr-out-flip.rev { animation-name: hs-tr-flip-out-rev; }
+.hs-tr-in-flip.rev { animation-name: hs-tr-flip-in-rev; }
+/* dive: this slide rushes past the viewer while the next comes up from the distance */
+@keyframes hs-tr-dive-out { from { opacity: 1; transform: none; filter: none; } to { opacity: 0; transform: scale(2.4); filter: blur(10px); } }
+@keyframes hs-tr-dive-in { from { opacity: 0; transform: scale(.55); } to { opacity: 1; transform: none; } }
+@keyframes hs-tr-dive-out-rev { from { opacity: 1; transform: none; } to { opacity: 0; transform: scale(.55); } }
+@keyframes hs-tr-dive-in-rev { from { opacity: 0; transform: scale(2.4); filter: blur(10px); } to { opacity: 1; transform: none; filter: none; } }
+.hs-tr-out-dive { animation: hs-tr-dive-out .62s cubic-bezier(.55, 0, .75, .3) both; z-index: 2; }
+.hs-tr-in-dive { animation: hs-tr-dive-in .72s cubic-bezier(.16, 1, .3, 1) .12s both; z-index: 1; }
+.hs-tr-out-dive.rev { animation-name: hs-tr-dive-out-rev; z-index: 1; }
+.hs-tr-in-dive.rev { animation-name: hs-tr-dive-in-rev; z-index: 2; }
+/* blinds: the next slide shows through stripes that widen (horizontal; vertical going back) */
+@property --hs-blind { syntax: "<length>"; inherits: false; initial-value: 136px; }
+@keyframes hs-tr-blinds { from { --hs-blind: 0px; } to { --hs-blind: 136px; } }
+.hs-tr-in-blinds { -webkit-mask-image: repeating-linear-gradient(180deg, #000 0 var(--hs-blind, 136px), transparent var(--hs-blind, 136px) 135px); mask-image: repeating-linear-gradient(180deg, #000 0 var(--hs-blind, 136px), transparent var(--hs-blind, 136px) 135px); animation: hs-tr-blinds .9s cubic-bezier(.65, 0, .35, 1) both; }
+.hs-tr-in-blinds.rev { -webkit-mask-image: repeating-linear-gradient(90deg, #000 0 var(--hs-blind, 136px), transparent var(--hs-blind, 136px) 135px); mask-image: repeating-linear-gradient(90deg, #000 0 var(--hs-blind, 136px), transparent var(--hs-blind, 136px) 135px); }
+/* curtain: the next slide opens from the middle outwards */
+@keyframes hs-tr-curtain { from { clip-path: inset(0 50% 0 50%); } to { clip-path: inset(0 0 0 0); } }
+.hs-tr-in-curtain { animation: hs-tr-curtain .9s cubic-bezier(.65, 0, .35, 1) both; }
+.hs-tr-out-blinds, .hs-tr-out-curtain { animation: hs-tr-dim .9s ease both; }
 ::view-transition-old(root), ::view-transition-new(root) { animation-duration: .5s; }
 ::view-transition-group(hs-title), ::view-transition-group(hs-eyebrow), ::view-transition-group(hs-takeaway) { animation-duration: .6s; animation-timing-function: cubic-bezier(.65, 0, .35, 1); }
 @media (prefers-reduced-motion: reduce) { .hs-player * { animation: none !important; transition: none !important; } }
