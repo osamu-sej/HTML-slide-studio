@@ -134,6 +134,8 @@ input[type="color"] { width: 44px; height: 32px; padding: 2px; border: 1px solid
 .outline-item select, .outline-item input, .outline-item textarea { font-size: 12.5px; }
 .outline-item .texts { display: grid; gap: 4px; min-width: 0; }
 .outline-item .title-input { font-weight: 800; }
+.outline-variety { margin-top: 10px; padding: 10px 12px; border-radius: 12px; border: 1px solid color-mix(in srgb, var(--warn) 35%, transparent); background: var(--warn-soft); font-size: 12.5px; display: grid; gap: 4px; }
+.outline-variety .hint { margin-top: 2px; }
 .outline-item textarea { min-height: 34px; resize: vertical; color: var(--ink-2); }
 .outline-item .btns { display: flex; gap: 2px; }
 .outline-item .btns .btn { width: 28px; height: 28px; padding: 0; }

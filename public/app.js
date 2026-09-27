@@ -1,4 +1,5 @@
 import { buildSearchIndex, deleteSavedDeck, getSavedDeck, listSavedDecks, putSavedDeck, searchSavedDecks, slideExcerpt } from "./saved-library.js";
+import { LOOK_ADVICE, LOOKS, lookOf, varietyIssues } from "./layout-looks.mjs?v=__APP_VERSION__";
 
 /*
  * HTML Slide Studio — the editor.
@@ -1366,14 +1367,14 @@ function lintDeck() {
     if (TITLED(slide.type) && charCount(title) > 30) add(i, "title", `タイトルが${Math.ceil(charCount(title))}字あります。論点を30字以内にすると2行に収まります`, "info", null, true);
     if (TITLED(slide.type) && title && strip(slide.takeaway) === title) add(i, "takeaway", "キーメッセージがタイトルと同じです。タイトルは論点、キーメッセージは結論の一文にします", "info");
     if ((String(slide.takeaway ?? "").match(/\*\*[^*]+\*\*/g) ?? []).length > 2) add(i, "takeaway", "強調（**〜**）は1〜2か所までにすると、伝えたい語句が目立ちます", "info");
-    if (i >= 2 && slide.type !== "section" && deck.slides[i - 1].type === slide.type && deck.slides[i - 2].type === slide.type) {
+    // Layouts that look alike are caught by look below; this catches three of the same chart or shape.
+    if (i >= 2 && !LOOKS[lookOf(slide)]?.alike && slide.type !== "section" && deck.slides[i - 1].type === slide.type && deck.slides[i - 2].type === slide.type) {
       add(i, "title", `「${typeLabel(slide.type)}」が3枚続いています。別のレイアウトにすると単調になりません`, "info", null, true);
     }
   });
-  const body = deck.slides.map((slide, i) => [slide.type, i]).filter(([type]) => TITLED(type));
-  const kinds = new Set(body.map(([type]) => type));
-  if (deck.slides.length >= 8 && body.length && kinds.size < 4) {
-    add(body[0][1], "title", `本文のレイアウトが${kinds.size}種類だけです。内容に合わせて4種類以上を使うと単調になりません（数値→KPI、内訳→ウォーターフォール、要因→ロジックツリーなど）`, "info", null, true);
+  for (const issue of varietyIssues(deck.slides)) {
+    add(issue.slide, "title", issue.message, issue.rule === "adjacent" ? "info" : "warning", null, true);
+    result[issue.slide].at(-1).ai = varietyRequest(issue);
   }
   for (const [title, indices] of titles) {
     if (indices.length < 2) continue;
@@ -1381,6 +1382,15 @@ function lintDeck() {
   }
   lintMemo = { key, result };
   return result;
+}
+
+/** What to ask the AI when slides look alike (the answer comes back as a proposal to compare and accept). */
+function varietyRequest(issue) {
+  const at = issue.slides.map((i) => `@${i + 1}`).join(" ");
+  const how = `内容に合う別の見せ方（${LOOK_ADVICE.join("／")}）`;
+  if (issue.rule === "crowded") return `${at} はどれも「${LOOKS[issue.look].label}」の見た目で単調です。内容に最も合う${issue.keep}枚だけ残し、ほかは${how}に変えてください。主張と数値は変えないでください`;
+  if (issue.rule === "adjacent") return `${at} が同じ「${LOOKS[issue.look].label}」の見た目で続いています。内容に合わないほうの1枚を、${how}に変えてください。主張と数値は変えないでください`;
+  return `本文の見た目が単調です。数字・図形・大きな一文など、内容に合う別の見せ方を取り入れて、見た目を4種類以上にしてください（${LOOK_ADVICE.join("／")}）。主張と数値は変えないでください`;
 }
 
 function overflowFor(index) {
@@ -2798,6 +2808,23 @@ async function generateOutline({ instruction = "" } = {}) {
 
 const OUTLINE_TYPES = () => SLIDE_TYPES.filter((type) => !["title", "closing"].includes(type));
 
+/** Layout choices grouped by how they look, so picking a different look is one glance away. */
+function typeOptions(selected) {
+  const groups = Object.entries(LOOKS).map(([, look]) => [look.label, look.types]);
+  const grouped = new Set(groups.flatMap(([, types]) => types));
+  const other = OUTLINE_TYPES().filter((type) => !grouped.has(type));
+  return [...groups, ["区切り", other]].map(([label, types]) => h("optgroup", { label },
+    types.filter((type) => TYPE_INFO[type]).map((type) => h("option", { value: type, selected: type === selected }, typeLabel(type)))));
+}
+
+function renderOutlineVariety() {
+  const note = $("outlineVariety");
+  const issues = state.outline ? varietyIssues(state.outline.slides) : [];
+  note.classList.toggle("hidden", !issues.length);
+  note.replaceChildren(...issues.map((issue) => h("div", {}, `⚠ ${issue.message}`)),
+    issues.length ? h("div", { class: "hint" }, `内容に合わせて形を変えると伝わりやすくなります：${LOOK_ADVICE.join("／")}。「AIで骨子を直す」に「見た目を散らして」と頼むこともできます。`) : null);
+}
+
 function renderOutlinePanel() {
   const panel = $("outlinePanel");
   const outline = state.outline;
@@ -2815,8 +2842,7 @@ function renderOutlinePanel() {
       h("span", { class: "no" }, String(index + 1)),
       fixed
         ? h("span", { class: "hint", style: { "padding-top": "7px" } }, typeLabel(item.type))
-        : h("select", { "aria-label": "レイアウト", onchange: (event) => { item.type = event.target.value; edit(); } },
-          OUTLINE_TYPES().map((type) => h("option", { value: type, selected: type === item.type }, typeLabel(type)))),
+        : h("select", { "aria-label": "レイアウト", onchange: (event) => { item.type = event.target.value; edit(); renderOutlineVariety(); } }, typeOptions(item.type)),
       h("div", { class: "texts" },
         h("input", { class: "title-input", type: "text", value: item.title, maxlength: 90, "aria-label": "タイトル", oninput: (event) => { item.title = event.target.value; edit(); } }),
         index === 0 ? null : h("input", { type: "text", value: item.takeaway || "", maxlength: 160, placeholder: "このスライドの結論（一文）", "aria-label": "結論", oninput: (event) => { item.takeaway = event.target.value; edit(); } }),
@@ -2827,6 +2853,7 @@ function renderOutlinePanel() {
         h("button", { class: "btn btn-ghost btn-danger", type: "button", title: "削除", disabled: fixed || items.length <= 2, onclick: () => { items.splice(index, 1); renderOutlinePanel(); edit(); } }, "✕")));
   }));
   $("outlineCount").textContent = `全${items.length}枚`;
+  renderOutlineVariety();
 }
 
 /** Second step: write the slides from the agreed outline. */
@@ -2966,7 +2993,7 @@ async function fixAllOverflow() {
   }
 }
 
-const REWRITE_CHIPS = ["取り込んだ資料を伝わる構成に磨き上げる", "各スライドをもっと簡潔に", "役員が3分で判断できるよう結論を強く", "新入社員にも分かる言葉で", "数値の根拠を目立たせる", "図解・表を増やして文字を減らす", "動きのある見せ方に（クリックで順番・詳細）", "ストーリーの流れを見直す"];
+const REWRITE_CHIPS = ["取り込んだ資料を伝わる構成に磨き上げる", "各スライドをもっと簡潔に", "役員が3分で判断できるよう結論を強く", "新入社員にも分かる言葉で", "数値の根拠を目立たせる", "図解・表を増やして文字を減らす", "似た見た目のスライドを減らし、内容に合う形で変化をつける", "動きのある見せ方に（クリックで順番・詳細）", "ストーリーの流れを見直す"];
 const BRUSHUP_INSTRUCTION = "取り込んだ元資料の事実・数値・写真を保ったまま、画面共有で伝わるプレゼンに磨き上げる。各本文スライドに結論（takeaway）を一文で入れ、内容に合う図解・表・グラフのレイアウトへ置き換え、補足は「クリックで開く詳細」に回し、発表用のノートを付ける";
 
 function openRewriteDialog(prefill = "", flexible = false) {
@@ -3749,7 +3776,7 @@ function checkItems() {
   state.deck.slides.forEach((_, index) => {
     for (const issue of overflowFor(index)) items.push({ index, severity: "error", kind: "overflow", field: issue.field, message: `文字あふれ：${issue.message}`, issue });
   });
-  lintDeck().flat().forEach((issue) => items.push({ index: issue.slide, severity: issue.severity, kind: "lint", field: issue.field, message: issue.message, fix: issue.fix }));
+  lintDeck().flat().forEach((issue) => items.push({ index: issue.slide, severity: issue.severity, kind: "lint", field: issue.field, message: issue.message, fix: issue.fix, ai: issue.ai }));
   const order = { error: 0, warning: 1, info: 2 };
   return items.sort((a, b) => order[a.severity] - order[b.severity] || a.index - b.index);
 }
@@ -3769,10 +3796,11 @@ async function openCheckDialog(forExport) {
     h("span", { class: "msg-text" }, item.message),
     h("button", { class: "btn btn-ghost", type: "button", onclick: () => { $("exportCheckDialog").close(); setView("single"); select(item.index); if (item.field) setTimeout(() => focusField(item.field), 50); } }, "移動"),
     item.fix ? h("button", { class: "btn", type: "button", onclick: () => { item.fix(); openCheckDialog(forExport); } }, "直す") : null,
-    !item.fix && canAi && item.severity !== "info" ? h("button", { class: "btn", type: "button", onclick: () => {
+    !item.fix && canAi && (item.severity !== "info" || item.ai) ? h("button", { class: "btn", type: "button", onclick: () => {
       $("exportCheckDialog").close();
       select(item.index);
       if (item.kind === "overflow") reviseSlide(item.index, "スライドに収まらない文字を、意味を保ったまま短くする（補足は details に回してよい）", [item.issue]);
+      else if (item.ai) sendChat(item.ai);
       else sendChat(`@${item.index + 1} の指摘「${item.message}」を直して`);
     } }, "✦ AIで直す") : null)));
   $("exportCheckGoBtn").hidden = !forExport;
@@ -4157,14 +4185,14 @@ const TEMPLATES = [
     ],
   },
   {
-    id: "training", name: "研修・勉強会", desc: "目的→手順→ポイント→注意点→明日からの行動", audience: "新入社員", purpose: "研修・勉強会",
+    id: "training", name: "研修・勉強会", desc: "目的→ポイント→注意点→手順→明日からの行動", audience: "新入社員", purpose: "研修・勉強会",
     slides: [
       { type: "title", title: "【研修タイトル】", subtitle: "【この研修で身につくこと】" },
       { type: "agenda", title: "本日の流れ", takeaway: "【研修のゴール】", items: ["【テーマ1：概要】", "【テーマ2：概要】", "【テーマ3：概要】", "まとめと明日からの行動"] },
       { type: "statement", title: "なぜ学ぶのか", text: "【学ぶ理由を大きな一文で】", takeaway: "【補足の一文】" },
-      { type: "process", title: "基本の手順", takeaway: "【手順の要点】", steps: ["【手順1：説明】", "【手順2：説明】", "【手順3：説明】"] },
       { type: "headerCards", title: "押さえるポイント", takeaway: "【最も大事なこと】", items: [T_CARD("【ポイント1】", "【説明】"), T_CARD("【ポイント2】", "【説明】"), T_CARD("【ポイント3】", "【説明】")] },
       { type: "checklist", title: "やってはいけないこと", takeaway: "【守るべきルール】", items: [T_CARD("【注意点1】", "【理由】"), T_CARD("【注意点2】", "【理由】"), T_CARD("【注意点3】", "【理由】")] },
+      { type: "process", title: "基本の手順", takeaway: "【手順の要点】", steps: ["【手順1：説明】", "【手順2：説明】", "【手順3：説明】"] },
       { type: "faq", title: "よくある質問", takeaway: "【迷ったときの考え方】", items: [{ q: "【質問1】", a: "【回答】" }, { q: "【質問2】", a: "【回答】" }] },
       { type: "closing", title: "明日から試すこと", message: "【行動1】\n【行動2】\n【行動3】" },
     ],
@@ -4175,8 +4203,8 @@ const TEMPLATES = [
       { type: "title", title: "【施策名】の振り返り", subtitle: "【期間・対象】" },
       { type: "kpi", title: "結果", takeaway: "【結果を一文で】", items: [{ label: "【指標1】", value: "【数値】", change: "【計画比・前年比】" }, { label: "【指標2】", value: "【数値】", change: "【計画比・前年比】" }, { label: "【指標3】", value: "【数値】", change: "【計画比・前年比】" }] },
       { type: "statsCompare", title: "計画との比較", takeaway: "【差が出た指標と理由】", leftTitle: "計画", rightTitle: "実績", stats: [{ label: "【指標1】", leftValue: "【計画】", rightValue: "【実績】" }, { label: "【指標2】", leftValue: "【計画】", rightValue: "【実績】" }] },
-      { type: "compare", title: "良かった点と課題", takeaway: "【次に生かすこと】", leftTitle: "良かった点", rightTitle: "課題", leftItems: ["【良かった点1】", "【良かった点2】"], rightItems: ["【課題1】", "【課題2】"] },
       { type: "logicTree", title: "要因の分析", takeaway: "【最大の要因】", root: "【結果】", branches: [{ title: "【要因1】", items: ["【事象】"], highlight: true }, { title: "【要因2】", items: ["【事象】"] }, { title: "【要因3】", items: ["【事象】"] }] },
+      { type: "compare", title: "良かった点と課題", takeaway: "【次に生かすこと】", leftTitle: "良かった点", rightTitle: "課題", leftItems: ["【良かった点1】", "【良かった点2】"], rightItems: ["【課題1】", "【課題2】"] },
       { type: "roadmap", title: "次の打ち手", takeaway: "【次期の方針】", items: [T_CARD("【すぐやること】", "【内容】"), T_CARD("【来月までに】", "【内容】"), T_CARD("【次期】", "【内容】")] },
       { type: "closing", title: "次のアクション", message: "【誰が・いつまでに・何をするか】" },
     ],
@@ -4201,7 +4229,7 @@ const TEMPLATES = [
       { type: "kpi", title: "今週の数字", takeaway: "【今週のポイントを一文で】", items: [{ label: "【指標1】", value: "【数値】", change: "【前週比】" }, { label: "【指標2】", value: "【数値】", change: "【前週比】" }, { label: "【指標3】", value: "【数値】", change: "【前週比】" }] },
       { type: "cards", title: "主なトピック", takeaway: "【最も伝えたいトピック】", items: [T_CARD("【トピック1】", "【内容】"), T_CARD("【トピック2】", "【内容】"), T_CARD("【トピック3】", "【内容】")] },
       { type: "checklist", title: "案件の進捗", takeaway: "【遅れている案件と対応】", items: [{ title: "【案件1】", desc: "【状況】", done: true }, { title: "【案件2】", desc: "【状況】" }, { title: "【案件3】", desc: "【状況】" }] },
-      { type: "content", title: "課題と対応", takeaway: "【相談したいこと】", points: ["【課題1：対応】", "【課題2：対応】"] },
+      { type: "compare", title: "課題と対応", takeaway: "【相談したいこと】", leftTitle: "課題", rightTitle: "対応", leftItems: ["【課題1】", "【課題2】"], rightItems: ["【対応1】", "【対応2】"] },
       { type: "closing", title: "来週の予定", message: "【来週やること・決めること】" },
     ],
   },

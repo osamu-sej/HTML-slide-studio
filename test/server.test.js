@@ -127,6 +127,10 @@ test("app shell, engine, assets and security headers", async () => {
     assert.match(await (await server.request("/engine/engine.css")).text(), /\.hs-slide/);
     const app = await (await server.request("/app.js")).text();
     assert.doesNotMatch(app, /__APP_VERSION__/);
+    const looks = await server.request("/layout-looks.mjs");
+    assert.equal(looks.status, 200, "the studio and the server share one list of layout looks");
+    assert.match(looks.headers.get("content-type"), /javascript/);
+    assert.match(await looks.text(), /export function varietyIssues/);
 
     const sample = await (await server.request("/samples/ai-rollout.json")).json();
     assert.ok(sample.slideData.length >= 40);
@@ -536,6 +540,68 @@ test("outline first: a skeleton is proposed, revised, then written into slides",
     assert.match(p3, /確定した構成/);
     assert.match(p3, /2\. \[kpi\] 成果 — 作業を月120時間削減/);
     assert.match(p3, /指定枚数: 3枚/);
+  });
+});
+
+test("layouts that look alike are chosen again: a plain outline is sent back, the user's own outline is respected", async () => {
+  const row = (type, title) => ({ type, title, takeaway: `${title}の結論`, content: "" });
+  // Four of six body slides are lines across the slide (timeline, lanes, process, roadmap).
+  const plain = { deckTitle: "生成AIの歴史と将来", reply: "流れで見せます。", slides: [
+    row("title", "生成AIの歴史と将来"), row("executiveSummary", "結論"), row("timeline", "大きな流れ"), row("diagram", "三つの層"),
+    row("compare", "ツール比較"), row("process", "試す手順"), row("roadmap", "将来への備え"), row("closing", "お願い"),
+  ] };
+  const varied = { ...plain, reply: "形を内容に合わせました。", slides: plain.slides.map((item) => ({ ...item, type: { diagram: "pyramid", roadmap: "checklist" }[item.type] ?? item.type })) };
+  await withFakeCodex([plain, varied, plain, shortDeck(8)], async (server, prompts) => {
+    const base = { brief: "生成AIの歴史と将来。社内向け。", settings: { slideCount: 8, textDensity: "standard" } };
+    const first = await waitForJob(server, (await (await server.postJson("/api/decks/outline", base)).json()).jobId);
+    assert.equal(first.status, "completed", first.error);
+    assert.equal(first.attempt, 2);
+    assert.deepEqual(first.outline.slides.map((item) => item.type), ["title", "executiveSummary", "timeline", "pyramid", "compare", "process", "checklist", "closing"]);
+    // The user puts the lines back and asks for something else: their choice stands.
+    const revised = await waitForJob(server, (await (await server.postJson("/api/decks/outline", { ...base, outline: plain.slides, instruction: "結論を強く" })).json()).jobId);
+    assert.equal(revised.status, "completed", revised.error);
+    assert.equal(revised.attempt, 1, "no worse than what the user sent, so it is not sent back");
+    // Written from an agreed outline, the layouts are not second-guessed either.
+    const written = await waitForJob(server, (await (await server.postJson("/api/decks", { ...base, outline: plain.slides })).json()).jobId);
+    assert.equal(written.status, "completed", written.error);
+    assert.equal(written.attempt, 1);
+    const sent = await prompts();
+    assert.equal(sent.length, 4);
+    assert.match(sent[0], /横に並ぶ流れ: process・timeline・roadmap/);
+    assert.match(sent[1], /「横に並ぶ流れ」（工程・年表・ロードマップ・レーン図）の見た目が4枚あります（3・4・6・7枚目）/);
+    assert.match(sent[1], /骨子全体のJSONをもう一度返してください/);
+  });
+});
+
+test("a deck written from scratch with alike layouts gets one second chance to vary them", async () => {
+  const plain = shortDeck(8);
+  plain.slideData = [plain.slideData[0], ...["timeline", "process", "roadmap", "process", "timeline", "roadmap"].map((type, i) => ({
+    type, title: `本文${i + 1}`, takeaway: "短い結論",
+    ...(type === "timeline" ? { milestones: [{ label: "開始", date: "4月" }, { label: "展開", date: "7月" }] } : type === "process" ? { steps: ["準備", "実行"] } : { items: [{ title: "段階1" }, { title: "段階2" }] }),
+  })), plain.slideData.at(-1)];
+  await withFakeCodex([plain, shortDeck(8)], async (server, prompts) => {
+    const job = await waitForJob(server, (await (await server.postJson("/api/decks", { brief: "テスト", settings: { slideCount: 8, textDensity: "standard" } })).json()).jobId);
+    assert.equal(job.status, "completed", job.error);
+    assert.equal(job.attempt, 2);
+    assert.equal(job.deck.slideData[2].type, "cards");
+    const [, retry] = await prompts();
+    assert.match(retry, /見た目が6枚あります/);
+    assert.match(retry, /新しい type のフィールドで中身を書き直す/);
+    assert.match(retry, /全体のJSONをもう一度返してください/);
+  });
+  // A first answer rejected for another reason does not use up the chance.
+  await withFakeCodex([shortDeck(4), plain, shortDeck(8)], async (server) => {
+    const job = await waitForJob(server, (await (await server.postJson("/api/decks", { brief: "テスト", settings: { slideCount: 8, textDensity: "standard" } })).json()).jobId);
+    assert.equal(job.status, "completed", job.error);
+    assert.equal(job.attempt, 3);
+    assert.equal(job.deck.slideData[2].type, "cards");
+  });
+  // Only once: a second plain answer is kept rather than asking again.
+  await withFakeCodex([plain, plain, shortDeck(8)], async (server) => {
+    const job = await waitForJob(server, (await (await server.postJson("/api/decks", { brief: "テスト", settings: { slideCount: 8, textDensity: "standard" } })).json()).jobId);
+    assert.equal(job.status, "completed", job.error);
+    assert.equal(job.attempt, 2);
+    assert.equal(job.deck.slideData[1].type, "timeline");
   });
 });
 

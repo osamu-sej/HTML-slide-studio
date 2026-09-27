@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, readFileSync, realpathSync, statSync, unlinkSync
 import { isAbsolute, join, relative, sep } from "node:path";
 import readline from "node:readline";
 
+import { LOOK_ADVICE, LOOKS, maxSameLook } from "../public/layout-looks.mjs";
 import { slideMeaning } from "./visual-relevance.mjs";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -143,9 +144,36 @@ const WRITING_GUIDE = [
   "- 同じスライドの項目名は長さと文体をそろえる（体言止めならすべて体言止め）。項目は3〜4個を基本にし、6個を超えるなら分ける",
   "- 数値は単位までそろえ、比較する数値は同じ単位・同じ桁で書く。記号の飾り（★・！・絵文字）は使わない",
   "- 証拠の型を内容で選ぶ：数字1つが主役→kpi（1項目。%ならゲージ）／指標を複数→kpi・dashboard／項目の大小比較→imageText（bar）／推移→imageText（line）／構成比→imageText（donut）／合計の内訳・増減の要因→waterfall／原因分解→logicTree／現状と目指す姿→beforeAfter／時系列の計画→roadmap・timeline・gantt／繰り返す業務→cycle／声→quote／決意・問い→statement",
-  "- 同じ type を3枚以上続けない。8枚以上の資料では5種類以上の type を使う。アイコン付きカードの羅列で図解の代わりにしない",
+  "- 見た目のグループ（下の一覧）を散らす。アイコン付きカードの羅列で図解の代わりにしない",
   "- 写真（visualAsset）は表紙・hero・写真が内容を補強するスライドだけ。図解・表・グラフのスライドには付けない",
 ];
+
+// Different layouts can look the same on screen (a timeline, a process and a roadmap are all a line of points),
+// so variety is asked for by look. The same groups drive the automatic check in server.js and the studio.
+const LOOK_GUIDE = [
+  "見た目のグループ（type の名前が違っても、画面では同じ形に見えるレイアウトの集まり。単調かどうかは type ではなくこのグループで判断する）:",
+  ...Object.values(LOOKS).map((look) => `- ${look.label}: ${look.types.join("・")}`),
+  "- 同じグループは本文の4枚に1枚まで（本文6枚なら2枚、10枚なら3枚）。同じグループを隣り合わせない。本文が6枚以上なら4グループ以上を使う",
+  "- 横に並ぶ流れは、順番や時期が本当にあるときだけ使う：timeline・roadmap・gantt は日付・期間を書けるとき、process は聞き手がその順にやる手順、diagram は複数の担当の間で仕事が受け渡されるとき。歴史・今後の方向性・備えでも、時期を書けないなら流れにしない",
+  "- 内容に合う形の選び方:",
+  ...LOOK_ADVICE.map((line) => `  - ${line}`),
+];
+
+/** What to tell the AI when its layouts look monotonous (see varietyIssues in public/layout-looks.mjs). */
+export function varietyRepairLines(issues, { outline = false } = {}) {
+  return [
+    "スライドの見た目が単調です（type の名前が違っても、画面では同じ形に見えます）。",
+    ...issues.map((issue) => `- ${issue.message}`),
+    "直し方:",
+    "- 「〜が○枚あります」は、内容に最も合う枚数だけその形で残し、残りのスライドの type を別の見た目のグループに変える",
+    "- 「続いています」は、どちらか内容に合わないほうの type を別のグループに変える",
+    "- 「○種類だけです」は、数字・図形・大きな一文・表などのグループを使って種類を増やす",
+    `- 新しい type は内容で選ぶ（${LOOK_ADVICE.join("／")}）。見た目を変えるためだけに内容と合わない形にしない`,
+    outline
+      ? "- 各スライドの title・takeaway の主旨、枚数、順序は変えない（type と、それに合わせた content のメモだけ直す）"
+      : "- type を変えたスライドは、新しい type のフィールドで中身を書き直す（主張・数値・notes・details は保つ）。枚数・順序・type を変えないスライドはそのままにする",
+  ];
+}
 
 const VISUAL_GUIDE = [
   "- visualAsset（内蔵写真）: ai=テクノロジー / aiWorkflow=AIワークフロー / promptDesign=設計・思考 / businessWorkshop=研修・会議 / businessEtiquette=接客・対話 / executiveDecision=経営判断 / storeOperations=店舗・現場 / dataInsight=データ分析 / transformationRoadmap=変革・計画 / customerExperience=顧客体験",
@@ -232,6 +260,7 @@ export function buildChatPrompt({ deck, message, history = [], current = 0, focu
     "",
     ...CAPACITY_GUIDE,
     ...WRITING_GUIDE,
+    ...LOOK_GUIDE,
   ].filter((line) => line !== "").join("\n");
 }
 
@@ -302,6 +331,7 @@ function outlineLines(outline) {
 
 export function buildOutlinePrompt({ brief, audience, purpose, tone, settings = {}, outline, instruction }) {
   const revising = Boolean(outline?.length);
+  const bodyCount = Math.max(1, (revising ? outline.length : settings.slideCount ?? 8) - 2);
   return [
     PERSONA,
     revising
@@ -314,11 +344,14 @@ export function buildOutlinePrompt({ brief, audience, purpose, tone, settings = 
     "",
     "骨子のルール:",
     "- slides[0] は type=title、最後は type=closing",
-    "- 2枚目以降で結論を先に示す。各スライドは1メッセージに絞り、同じtypeを連続させない",
+    "- 2枚目以降で結論を先に示す。各スライドは1メッセージに絞る",
     "- title は24字以内、takeaway はそのスライドの結論を45字以内で言い切る、content はそのスライドに載せる中身のメモ（80字以内、素材の数値をそのまま使う）",
-    "- type は内容に合う専門レイアウトを選ぶ（工程はprocess、対比はcompare・beforeAfter、定量はkpi・imageText（グラフ）・dashboard、計画はroadmap・gantt・timeline、構造はdiagram・cards、内訳・増減はwaterfall、原因分解はlogicTree、印象づけたい一文はstatement・hero など）",
+    "- type は内容に合う専門レイアウトを選ぶ（手順はprocess、対比はcompare・beforeAfter、定量はkpi・imageText（グラフ）・dashboard、日付のある計画はroadmap・gantt・timeline、層・段階はpyramid・stepUp、関係はvenn・triangle・cycle、やること・ポイントはcards・checklist・grid2x2、内訳・増減はwaterfall、原因分解はlogicTree、印象づけたい一文はstatement・hero など）",
+    `- 見た目を散らす：本文${bodyCount}枚なら、同じ見た目のグループ（下の一覧）は${maxSameLook(bodyCount)}枚まで、隣り合わせない。とくに timeline・roadmap・process・diagram・flowChart・gantt はどれも「横に並ぶ流れ」に見えるので、合わせて${maxSameLook(bodyCount)}枚まで`,
     "- reply: 骨子の狙いを1〜2文で説明する（修正時は何を変えたか）",
     ...audienceLines(audience),
+    "",
+    ...LOOK_GUIDE,
     ...(revising ? ["", `ユーザーの指示: ${instruction || "より良くする"}`, "", "現在の骨子:", ...outline.map((item, index) => `${index + 1}. [${item.type}] ${item.title} — ${item.takeaway ?? ""}（${item.content ?? ""}）`)] : []),
     "",
     `素材・依頼内容:\n${brief}`,
@@ -344,7 +377,7 @@ export function buildDeckPrompt(input) {
     "- 1枚目はtitle、最後はclosingにする",
     "- 2枚目以降で結論を先に示す（6枚以上ならexecutiveSummaryかkpiを序盤に置く）。各スライドは1メッセージに絞る",
     "- 本文スライドには、そのスライドの結論を一文で言い切る takeaway を必ず入れる。見出しだけで終わらせず、各要素に理由・意味・具体像を含める",
-    "- 同じtypeを連続させず、内容に合う専門レイアウトを使う。工程はprocess、構造はdiagram、対比はcompare、定量はkpi/statsCompare/グラフ、内訳・増減はwaterfall、原因分解はlogicTree、計画はroadmap/gantt/timeline",
+    "- 内容に合う専門レイアウトを使い、見た目のグループ（下の一覧）を散らす。手順はprocess、対比はcompare、定量はkpi/statsCompare/グラフ、内訳・増減はwaterfall、原因分解はlogicTree、日付のある計画はroadmap/gantt/timeline、層・段階はpyramid/stepUp、関係はvenn/triangle/cycle、やること・ポイントはcards/checklist/grid2x2",
     "- 素材に比較可能な数値が2点以上あれば、最低1枚をimageTextのimage（グラフ）で可視化する。数値がない場合は捏造せず図解で構造を見せる",
     "- 10枚以上の資料では、章の区切りに section、印象づけたい一文に statement か hero を1枚使ってよい（hero には内容に合う visualAsset を付け、photoMotion は zoom）",
     "- 長い内容は削らず、table、compare、twoColumn、section区切りなど適切な構造へ分ける",
@@ -363,6 +396,7 @@ export function buildDeckPrompt(input) {
     ...CAPACITY_GUIDE,
     "",
     ...WRITING_GUIDE,
+    ...LOOK_GUIDE,
     "",
     `素材・依頼内容:\n${input.brief}`,
   ].join("\n");
@@ -407,6 +441,7 @@ export function buildRevisePrompt({ deck, slideIndex, instruction, issues = [], 
     "",
     ...CAPACITY_GUIDE,
     ...WRITING_GUIDE,
+    ...LOOK_GUIDE,
   ].filter((line) => line !== "").join("\n");
 }
 
@@ -419,7 +454,7 @@ export function buildVariantsPrompt({ deck, slideIndex, instruction = "" }) {
     `資料「${deck.title ?? ""}」（対象者: ${deck.audience || "未指定"}、目的: ${deck.purpose || "未指定"}）の${slideIndex + 1}枚目について、見せ方の違う案を3つ作ってください。`,
     "最終回答は指定されたJSONスキーマに一致するJSONだけを返してください。入力にない数値や事実は作らないでください。",
     ...memoLines(deck),
-    "- 3案は、レイアウト（type）か切り口がはっきり違うものにする（例：図解で見せる案／数字を大きく見せる案／一文で言い切る案）",
+    "- 3案は、レイアウト（type）か切り口がはっきり違うものにする（例：図解で見せる案／数字を大きく見せる案／一文で言い切る案）。3案を同じ見た目のグループにせず、少なくとも1案は前後のスライドと違うグループにする",
     "- label はその案の特徴を12字以内で（例：「数字を大きく」「3ステップの図解」）",
     slideIndex === 0 ? "- 表紙なので type は title のまま、言い回しで変化をつける" : "",
     slideIndex === total - 1 ? "- 最後のスライドなので type は closing のまま、言い回しで変化をつける" : "",
@@ -438,6 +473,7 @@ export function buildVariantsPrompt({ deck, slideIndex, instruction = "" }) {
     "",
     ...CAPACITY_GUIDE,
     ...WRITING_GUIDE,
+    ...LOOK_GUIDE,
   ].filter((line) => line !== "").join("\n");
 }
 
@@ -466,6 +502,7 @@ export function buildRewritePrompt({ deck, instruction, settings = {} }) {
     ...CAPACITY_GUIDE,
     "",
     ...WRITING_GUIDE,
+    ...LOOK_GUIDE,
     "",
     "現在の資料JSON:",
     JSON.stringify({ deckTitle: deck.title ?? deck.deckTitle, purpose: deck.purpose, audience: deck.audience, slideData: slides }),

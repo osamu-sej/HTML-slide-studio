@@ -16,6 +16,7 @@ import {
   buildVariantsPrompt,
   buildRewritePrompt,
   omitNullObjectValues,
+  varietyRepairLines,
   withoutImageData,
 } from "./server/codex-app-server.mjs";
 import { applyChatOperations, summarizeChange } from "./server/chat.mjs";
@@ -25,6 +26,7 @@ import { LocalModel } from "./server/local-ai.mjs";
 import { reconcileChatVisuals, slideMeaning } from "./server/visual-relevance.mjs";
 import { imageBrief } from "./server/image-brief.mjs";
 import { extractText, importDeck } from "./server/extract.mjs";
+import { varietyIssues } from "./public/layout-looks.mjs";
 import {
   chatRequestSchema,
   chatResultSchema,
@@ -91,6 +93,7 @@ function loadStatic() {
   add("/app.js", inject(readFileSync(join(PUBLIC, "app.js"), "utf8")), TYPES[".js"]);
   add("/saved-library.js", readFileSync(join(PUBLIC, "saved-library.js"), "utf8"), TYPES[".js"]);
   add("/app.css", readFileSync(join(PUBLIC, "app.css"), "utf8"), TYPES[".css"]);
+  add("/layout-looks.mjs", readFileSync(join(PUBLIC, "layout-looks.mjs"), "utf8"), TYPES[".js"]);
   add("/engine/engine.js", readFileSync(join(PUBLIC, "engine", "engine.js"), "utf8").replace("/*__ICONS__*/{}", () => icons), TYPES[".js"]);
   add("/engine/motion.js", readFileSync(join(PUBLIC, "engine", "motion.js"), "utf8"), TYPES[".js"]);
   add("/engine/engine.css", readFileSync(join(PUBLIC, "engine", "engine.css"), "utf8"), TYPES[".css"]);
@@ -299,17 +302,24 @@ function newJob(kind, session, input) {
 
 function startOutlineJob(session, input) {
   const job = newJob("outline", session, { brief: input.brief.slice(0, 200) });
+  // Revising someone's outline may keep the layouts they chose: only ask again when the AI made it plainer.
+  const baseline = input.outline ? varietyIssues(input.outline).length : 0;
   codex.runJob(job, {
     prompt: buildOutlinePrompt(input),
     outputSchema: codexOutlineSchema,
-    maxAttempts: 2,
+    maxAttempts: 3,
     effort: "low",
-    async finalize(candidate) {
+    async finalize(candidate, attempt) {
       const outline = outlineResultSchema.parse(omitNullObjectValues(candidate));
       if (outline.slides[0].type !== "title") throw new Error("slides[0] の type を title にしてください。");
       if (outline.slides.at(-1).type !== "closing") throw new Error("最後のスライドの type を closing にしてください。");
       if (outline.slides.slice(1, -1).some((item) => ["title", "closing"].includes(item.type))) throw new Error("表紙と最後以外に title・closing を使わないでください。");
-      return { result: { outline }, detail: `${outline.slides.length}枚の骨子ができました。` };
+      const result = { outline };
+      const plain = varietyIssues(outline.slides);
+      if (plain.length > baseline && attempt <= 2) {
+        return { retry: [...varietyRepairLines(plain, { outline: true }), "骨子全体のJSONをもう一度返してください。"].join("\n"), fallback: result, detail: "同じ見た目のスライドが続かないよう、レイアウトを選び直しています。" };
+      }
+      return { result, detail: `${outline.slides.length}枚の骨子ができました。` };
     },
   }).catch((error) => codex.failJob(job.id, error));
   return job;
@@ -341,8 +351,14 @@ function slidesSource(slides, ...extra) {
   return [JSON.stringify(withoutImageData(slides)), ...extra].join("\n");
 }
 
-function startDeckJob(session, input, prompt = buildDeckPrompt(input), source = deckSource(input)) {
+/**
+ * `variety` is how many look problems (varietyIssues) the answer may have before the AI is asked to pick
+ * other layouts: 0 for a deck written from scratch, the current count when rewriting a deck, and null
+ * (never ask) when the layouts come from an outline the user agreed to.
+ */
+function startDeckJob(session, input, prompt = buildDeckPrompt(input), source = deckSource(input), { variety = input.outline ? null : 0 } = {}) {
   const job = newJob("deck", session, input);
+  let layoutsAsked = false;
   codex.runJob(job, {
     prompt,
     outputSchema: codexDeckSchema,
@@ -357,11 +373,16 @@ function startDeckJob(session, input, prompt = buildDeckPrompt(input), source = 
       if (deck.slideData.at(-1)?.type !== "closing") throw new Error("最終スライドのtypeをclosingにしてください。");
       const overflow = capacityIssues(deck.slideData).filter((issue) => issue.severity === "error");
       const unsourced = unsourcedNumbers(deck.slideData, source);
+      // Writing a whole deck again is slow: layouts get one second chance.
+      const plainIssues = variety === null || layoutsAsked ? [] : varietyIssues(deck.slideData);
+      const plain = plainIssues.length > variety && attempt <= 2 ? plainIssues : [];
+      if (plain.length) layoutsAsked = true;
       const result = { deck: { ...deck, settings: input.settings }, issues: [...overflow, ...unsourced] };
-      if ((overflow.length || unsourced.length) && attempt <= 2) {
+      if ((overflow.length || unsourced.length || plain.length) && attempt <= 2) {
         const retry = [overflow.length ? buildRepairPrompt({ issues: overflow, slides: deck.slideData }) : "", ...factRepairLines(unsourced, deck.slideData),
-          unsourced.length && !overflow.length ? "枚数・順序・他のスライドは変えずに、全体のJSONをもう一度返してください。" : ""].filter(Boolean).join("\n");
-        return { retry, fallback: result, detail: [overflow.length ? `${overflow.length}か所の長すぎる文` : "", unsourced.length ? `素材にない数値${unsourced.length}か所` : ""].filter(Boolean).join("と") + "を自動で修正しています。" };
+          ...(plain.length ? varietyRepairLines(plain) : []),
+          !overflow.length && (unsourced.length || plain.length) ? "枚数・順序・他のスライドは変えずに、全体のJSONをもう一度返してください。" : ""].filter(Boolean).join("\n");
+        return { retry, fallback: result, detail: [overflow.length ? `${overflow.length}か所の長すぎる文` : "", unsourced.length ? `素材にない数値${unsourced.length}か所` : "", plain.length ? "同じ見た目が続くレイアウト" : ""].filter(Boolean).join("と") + "を自動で修正しています。" };
       }
       return { result, detail: `${count}枚の構成が完成しました。${overflow.length ? `（${overflow.length}か所は要確認）` : ""}${unsourced.length ? describeUnsourced(unsourced) : ""}` };
     },
@@ -719,7 +740,7 @@ const httpServer = createServer(async (req, res) => {
       };
       const input = { deckTitle: request.deck.title, brief: request.instruction, audience: request.deck.audience, purpose: request.deck.purpose, settings };
       return startDeckJob(session, input, buildRewritePrompt({ deck: request.deck, instruction: request.instruction, settings }),
-        slidesSource(request.deck.slides, request.deck.title, request.instruction, request.deck.memo));
+        slidesSource(request.deck.slides, request.deck.title, request.instruction, request.deck.memo), { variety: varietyIssues(request.deck.slides).length });
     });
   }
 
