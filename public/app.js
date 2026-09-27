@@ -1,10 +1,11 @@
+import { buildSearchIndex, deleteSavedDeck, getSavedDeck, listSavedDecks, putSavedDeck, searchSavedDecks, slideExcerpt } from "./saved-library.js";
+import { LOOK_ADVICE, LOOKS, lookOf, varietyIssues } from "./layout-looks.mjs?v=__APP_VERSION__";
+
 /*
  * HTML Slide Studio — the editor.
  * Brief → outline → slides (Codex), then edit by chat or by hand, present with motion, export one HTML file.
  * Slides are drawn by SlideEngine (engine/engine.js) and played by engine/motion.js.
  */
-import { LOOK_ADVICE, LOOKS, lookOf, varietyIssues } from "./layout-looks.mjs?v=__APP_VERSION__";
-
 const $ = (id) => document.getElementById(id);
 const E = window.SlideEngine;
 E.lottieUrl = "/vendor/lottie.js";
@@ -156,6 +157,7 @@ const state = {
   codexAuthorized: false,
   codexImageAuthorized: false,
   historyId: null,
+  savedDeckId: null,
   chat: { messages: [], busy: false, progress: "", attachment: null },
   outline: null,
   createBusy: false,
@@ -867,12 +869,13 @@ function slidePicture(slide, index, deck = state.deck) {
 
 // ---------------------------------------------------------------- deck lifecycle
 
-function loadDeck(deck, { source = "", keepUndo = false, imported = null } = {}) {
+function loadDeck(deck, { source = "", keepUndo = false, imported = null, savedDeckId = null, selected = 0 } = {}) {
   stopMotionPreview({ render: false });
   state.imported = imported;
   if (!keepUndo && state.deck) pushUndo();
   state.deck = deck;
-  state.selected = keepUndo ? Math.min(state.selected, deck.slides.length - 1) : 0;
+  state.selected = keepUndo ? Math.min(state.selected, deck.slides.length - 1) : Math.max(0, Math.min(selected, deck.slides.length - 1));
+  state.savedDeckId = savedDeckId;
   $("deckTitleInput").value = deck.title;
   $("editTab").disabled = false;
   $("resumeEditBtn").classList.remove("hidden");
@@ -1037,7 +1040,7 @@ function saveCurrent() {
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
     try {
-      localStorage.setItem(STORAGE.current, JSON.stringify({ deck: state.deck, selected: state.selected, form: formState(), outline: state.outline, historyId: state.historyId, savedAt: new Date().toISOString() }));
+      localStorage.setItem(STORAGE.current, JSON.stringify({ deck: state.deck, selected: state.selected, form: formState(), outline: state.outline, historyId: state.historyId, savedDeckId: state.savedDeckId, savedAt: new Date().toISOString() }));
       state.autosaveWarned = false;
     } catch {
       if (!state.autosaveWarned) toast("自動保存できませんでした（ブラウザの容量不足）。「その他」→「JSONで保存」で保存してください");
@@ -1157,6 +1160,139 @@ function openHistory() {
   renderHistory();
   renderVersions();
   $("historyDialog").showModal();
+}
+
+// ---------------------------------------------------------------- explicitly saved decks (separate from the rolling autosave/history)
+
+let libraryRecords = [];
+
+async function assertLibraryMedia(deck) {
+  for (const slide of deck.slides) {
+    const src = slide.media?.src;
+    if (src?.startsWith("idb:") && !(await mediaBlob(src))) {
+      throw new Error("この資料の写真・動画がブラウザ内に見つかりません。欠けた素材を入れ直してから保存してください。");
+    }
+  }
+}
+
+async function saveToLibrary({ asNew = false } = {}) {
+  if (!state.deck) return;
+  if (state.inline) finishInlineEdit(true);
+  const button = $("saveDeckBtn");
+  const newButton = $("saveAsNewBtn");
+  button.disabled = true;
+  newButton.disabled = true;
+  try {
+    const deck = JSON.parse(JSON.stringify(state.deck));
+    await assertLibraryMedia(deck);
+    const existing = !asNew && state.savedDeckId ? await getSavedDeck(state.savedDeckId) : null;
+    const id = existing?.id || crypto.randomUUID();
+    const record = {
+      id, title: deck.title, createdAt: existing?.createdAt || Date.now(), updatedAt: Date.now(),
+      selected: state.selected, deck, searchIndex: buildSearchIndex(deck),
+    };
+    await putSavedDeck(record);
+    state.savedDeckId = id;
+    saveCurrent();
+    updateTopbar();
+    if ($("libraryDialog").open) {
+      libraryRecords = [record, ...libraryRecords.filter((item) => item.id !== id)];
+      renderLibrary();
+    }
+    toast(existing ? "資料を上書き保存しました" : "資料を保存しました");
+  } catch (error) {
+    toast(`保存できませんでした：${error.message}`);
+  } finally {
+    button.disabled = false;
+    newButton.disabled = !state.deck;
+  }
+}
+
+async function currentDeckCanBeReplaced() {
+  if (!state.deck) return true;
+  const saved = state.savedDeckId ? await getSavedDeck(state.savedDeckId).catch(() => null) : null;
+  if (saved && JSON.stringify(saved.deck) === JSON.stringify(state.deck)) return true;
+  return window.confirm("編集中の資料に未保存の変更があります。保存庫から別の資料を開きますか？ 必要なら先に「資料を保存」を押してください。");
+}
+
+async function openSavedDeck(record, selected = 0) {
+  try {
+    if (!(await currentDeckCanBeReplaced())) return;
+    const latest = await getSavedDeck(record.id);
+    if (!latest) throw new Error("この資料は保存庫から削除されています。");
+    await assertLibraryMedia(latest.deck);
+    $("libraryDialog").close();
+    state.historyId = null;
+    loadDeck(normalizeDeck(latest.deck), { source: "保存庫", savedDeckId: latest.id, selected });
+  } catch (error) {
+    showStatus("libraryStatus", `開けませんでした：${error.message}`, "error");
+  }
+}
+
+async function insertSavedSlide(record, index) {
+  if (!state.deck || state.deck.slides.length >= 50) return;
+  try {
+    const latest = await getSavedDeck(record.id);
+    const source = latest?.deck.slides[index];
+    if (!source) throw new Error("スライドが見つかりません。");
+    await assertLibraryMedia({ slides: [source] });
+    const at = Math.min(state.selected + 1, state.deck.slides.length - 1);
+    insertSlide(at, JSON.parse(JSON.stringify(source)));
+    $("libraryDialog").close();
+    ensureMedia({ slides: [source] }).then((added) => { if (added) { thumbCache.clear(); renderFilmstrip(); renderStage(); } });
+    toast(`${index + 1}枚目を現在の資料に追加しました`);
+  } catch (error) {
+    showStatus("libraryStatus", `追加できませんでした：${error.message}`, "error");
+  }
+}
+
+async function removeSavedDeck(record) {
+  if (!window.confirm(`「${record.title}」を保存庫から削除しますか？ この操作は取り消せません。`)) return;
+  try {
+    await deleteSavedDeck(record.id);
+    libraryRecords = libraryRecords.filter((item) => item.id !== record.id);
+    if (state.savedDeckId === record.id) { state.savedDeckId = null; saveCurrent(); updateTopbar(); }
+    renderLibrary();
+  } catch (error) {
+    showStatus("libraryStatus", `削除できませんでした：${error.message}`, "error");
+  }
+}
+
+function renderLibrary() {
+  const query = $("librarySearch").value.trim();
+  const matches = searchSavedDecks(libraryRecords, query);
+  $("saveAsNewBtn").disabled = !state.deck;
+  showStatus("libraryStatus", query ? `${matches.length}件の資料が見つかりました` : `${matches.length}件の資料を保存しています`);
+  $("libraryList").replaceChildren(...(matches.length ? matches.map(({ record, slideMatches }) => {
+    const slideRows = slideMatches.map((index) => {
+      const slide = record.deck.slides[index];
+      return h("div", { class: "library-slide" },
+        h("div", { class: "text" }, h("b", {}, `${index + 1}枚目｜${slide.title || typeLabel(slide.type)}`), h("span", {}, slideExcerpt(slide, query))),
+        h("div", { class: "library-slide-actions" },
+          h("button", { class: "btn", type: "button", onclick: () => openSavedDeck(record, index) }, "この1枚で開く"),
+          h("button", { class: "btn", type: "button", disabled: !state.deck || state.deck.slides.length >= 50, onclick: () => insertSavedSlide(record, index) }, "今の資料に追加")));
+    });
+    return h("div", { class: "library-card" },
+      h("div", { class: "library-card-head" },
+        h("div", {}, h("b", {}, record.title || "無題の資料"), h("span", { class: "hint" }, `${record.deck.slides.length}枚・${new Date(record.updatedAt).toLocaleString("ja-JP")}`)),
+        h("div", { class: "library-actions" },
+          h("button", { class: "btn btn-primary", type: "button", onclick: () => openSavedDeck(record) }, "資料全体を開く"),
+          h("button", { class: "btn btn-ghost btn-danger", type: "button", onclick: () => removeSavedDeck(record) }, "削除"))),
+      h("details", { open: Boolean(query && slideRows.length) }, h("summary", {}, `スライドを表示（${slideRows.length}枚）`),
+        slideRows.length ? slideRows : h("p", { class: "hint" }, "資料内の複数箇所にキーワードが見つかりました。")));
+  }) : [h("p", { class: "hint" }, query ? "一致する資料はありません。別のキーワードを試してください。" : "まだ保存した資料はありません。編集中の資料で「資料を保存」を押してください。")]));
+}
+
+async function openLibrary() {
+  $("librarySearch").value = "";
+  $("libraryDialog").showModal();
+  $("librarySearch").focus();
+  try {
+    libraryRecords = await listSavedDecks();
+    renderLibrary();
+  } catch (error) {
+    showStatus("libraryStatus", `保存庫を開けませんでした：${error.message}`, "error");
+  }
 }
 
 // ---------------------------------------------------------------- deck lint ("構成チェック")
@@ -1279,7 +1415,8 @@ function setMode(mode) {
 
 function updateTopbar() {
   const editing = state.mode === "edit" && Boolean(state.deck);
-  for (const id of ["deckTitleInput", "undoBtn", "redoBtn", "presentBtn", "pdfBtn", "downloadBtn"]) $(id).classList.toggle("hidden", !editing);
+  for (const id of ["deckTitleInput", "saveDeckBtn", "undoBtn", "redoBtn", "presentBtn", "pdfBtn", "downloadBtn"]) $(id).classList.toggle("hidden", !editing);
+  $("saveDeckBtn").textContent = state.savedDeckId ? "上書き保存" : "資料を保存";
   $("deckReviseBtn").classList.toggle("hidden", !editing || !state.codexAuthorized);
   $("deckReviseBtn").disabled = state.aiBusy;
   $("undoBtn").disabled = !state.undo.length;
@@ -3549,6 +3686,8 @@ function commandList() {
       cmd("資料", "⎙", "PDFとして保存・印刷", () => printPdf()),
       cmd("資料", "✓", "チェック結果を見る", () => openCheckDialog(false)),
       cmd("資料", "⌕", "検索・置換", () => openReplace()),
+      cmd("資料", "▣", "資料を保存庫に保存", () => saveToLibrary()),
+      cmd("資料", "⌕", "保存庫から資料・スライドを探す", () => openLibrary()),
       cmd("資料", "🗒", "スピーカーノートを作る", () => openNotesDialog()),
       cmd("資料", "🕘", "版の履歴・過去の資料", () => openHistory()),
       cmd("資料", "{}", "JSONで保存", () => saveJsonFile()),
@@ -3571,6 +3710,7 @@ function commandList() {
     );
   }
   list.push(
+    cmd("はじめる", "⌕", "保存庫から資料・スライドを探す", () => openLibrary()),
     cmd("はじめる", "✚", "新しい資料を作る", () => { setMode("create"); $("briefInput").focus(); }),
     cmd("はじめる", "⇪", "既存の資料を取り込む（PowerPoint・PDF・Word）", () => $("importDeckFile").click()),
     cmd("はじめる", "▦", "雛形から作る", () => openTemplateDialog()),
@@ -4163,6 +4303,10 @@ function bind() {
   $("importDeckFile").addEventListener("change", (event) => { importExistingDeck(event.target.files?.[0]); event.target.value = ""; });
   $("importJsonBtn").addEventListener("click", openJsonDialog);
   $("connectCodexBtn").addEventListener("click", startCodexLogin);
+  $("saveDeckBtn").addEventListener("click", () => saveToLibrary());
+  $("libraryBtn").addEventListener("click", openLibrary);
+  $("librarySearch").addEventListener("input", renderLibrary);
+  $("saveAsNewBtn").addEventListener("click", () => saveToLibrary({ asNew: true }));
   $("copyDeviceCodeBtn").addEventListener("click", copyDeviceCode);
   $("passcodePanel").addEventListener("submit", submitPasscode);
   $("historyBtn").addEventListener("click", openHistory);
@@ -4294,8 +4438,8 @@ function bind() {
     if (!typing && event.key === "?") { event.preventDefault(); $("helpDialog").showModal(); return; }
     if (meta && event.key.toLowerCase() === "s") {
       event.preventDefault();
-      saveCurrent();
-      toast(state.deck ? "自動保存されています。ファイルにするには「HTML出力」か「その他」→「JSONで保存」" : "入力内容は自動保存されています");
+      if (state.deck) saveToLibrary();
+      else { saveCurrent(); toast("入力内容は自動保存されています"); }
       return;
     }
     if (typing || state.mode !== "edit" || !state.deck) return;
@@ -4320,6 +4464,7 @@ function restore() {
       state.deck = normalizeDeck(saved.deck);
       state.selected = Math.min(saved.selected || 0, state.deck.slides.length - 1);
       state.historyId = saved.historyId || null;
+      state.savedDeckId = saved.savedDeckId || null;
       $("deckTitleInput").value = state.deck.title;
       $("editTab").disabled = false;
       $("resumeEditBtn").classList.remove("hidden");

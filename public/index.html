@@ -22,6 +22,8 @@
       <div class="top-actions">
         <span id="hostStatus" class="pill"><span class="dot"></span><span class="label">接続確認中</span></span>
         <span id="localAiStatus" class="pill" hidden><span class="dot"></span><span class="label">予備AI</span></span>
+        <button id="saveDeckBtn" class="btn btn-ghost hidden" type="button" title="編集中の資料をこのブラウザに保存">資料を保存</button>
+        <button id="libraryBtn" class="btn btn-ghost" type="button" title="保存した資料やスライドを探す">保存庫</button>
         <button id="historyBtn" class="btn btn-ghost" type="button" title="生成履歴・版の履歴">履歴</button>
         <button id="helpBtn" class="btn btn-icon btn-ghost" type="button" title="使い方とショートカット（?）" aria-label="使い方">?</button>
         <button id="commandBtn" class="btn btn-ghost command-btn" type="button" title="コマンドを探す・AIに頼む（⌘K）"><span>検索・コマンド</span><kbd>⌘K</kbd></button>
@@ -263,6 +265,20 @@
         </div>
         <p class="hint" style="margin:0 0 12px">直近20件の資料をこのブラウザに保存しています。</p>
         <div id="historyList" class="history-list"></div>
+      </div>
+    </dialog>
+
+    <dialog id="libraryDialog" aria-label="保存した資料">
+      <div class="dialog-head"><h3>保存した資料</h3><button class="btn btn-ghost btn-icon" type="button" data-close aria-label="閉じる">✕</button></div>
+      <div class="dialog-body">
+        <p class="hint">このブラウザに明示的に保存した資料です。資料名、スライドの本文・表・数値・ノートを検索できます。</p>
+        <div class="library-controls">
+          <input id="librarySearch" type="search" placeholder="キーワードで資料・スライドを探す" aria-label="保存した資料を検索" />
+          <button id="saveAsNewBtn" class="btn" type="button">編集中の資料を新規保存</button>
+        </div>
+        <div id="libraryStatus" class="status" role="status" aria-live="polite"></div>
+        <div id="libraryList" class="library-list"></div>
+        <p class="hint">保存庫はこのブラウザ専用です。ブラウザのデータを消す前や別の端末へ移すときは「JSONで保存」も使ってください。</p>
       </div>
     </dialog>
 

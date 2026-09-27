@@ -475,6 +475,22 @@ dialog[open] { animation: dialog-in .22s cubic-bezier(.16, 1, .3, 1); }
 .history-item b { display: block; font-size: 13px; }
 .history-item span { color: var(--muted); font-size: 12px; }
 .history-item .actions { display: flex; gap: 6px; }
+.library-controls { display: flex; gap: 8px; margin: 12px 0; }
+.library-controls input { flex: 1; min-width: 0; }
+.library-list { display: grid; gap: 10px; }
+.library-card { border: 1px solid var(--line); border-radius: 10px; padding: 12px; }
+.library-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.library-card-head b { display: block; font-size: 13px; }
+.library-card-head .hint { display: block; margin-top: 3px; }
+.library-actions, .library-slide-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.library-card details { margin-top: 10px; }
+.library-card summary { cursor: pointer; font-size: 12px; font-weight: 700; }
+.library-slide { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; padding: 9px 0; border-top: 1px solid var(--line); }
+.library-slide:first-of-type { margin-top: 8px; }
+.library-slide .text { min-width: 0; }
+.library-slide .text b { display: block; font-size: 12px; }
+.library-slide .text span { display: block; color: var(--muted); font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
+.library-slide-actions { flex: none; }
 .type-dialog { width: min(900px, calc(100vw - 32px)); }
 .type-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
 .type-grid button { display: grid; gap: 4px; padding: 8px; border: 1px solid var(--line); border-radius: 12px; background: #fff; text-align: left; transition: border-color .15s, background .15s; }
