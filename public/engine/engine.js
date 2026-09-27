@@ -248,8 +248,11 @@
         return box;
       }
       if (ctx.live) {
-        const params = new URLSearchParams({ autoplay: "0", mute: desc.muted ? "1" : "0", playsinline: "1", rel: "0", modestbranding: "1", enablejsapi: "1", ...(desc.loop ? { loop: "1", playlist: desc.yt } : {}) });
-        box.append(h("iframe", { src: `https://www.youtube-nocookie.com/embed/${desc.yt}?${params}`, title: desc.name || "動画", allow: "autoplay; encrypted-media; picture-in-picture; fullscreen", allowfullscreen: true, loading: "lazy", "data-autoplay": desc.autoplay ? "" : null }));
+        // YouTube only plays for a page that says where it is (error 153 otherwise). The studio keeps its
+        // address to itself (Referrer-Policy: same-origin), so the player alone is told the site, not the page.
+        const origin = /^https?:$/.test(root.location?.protocol ?? "") ? root.location.origin : "";
+        const params = new URLSearchParams({ autoplay: "0", mute: desc.muted ? "1" : "0", playsinline: "1", rel: "0", modestbranding: "1", enablejsapi: "1", ...(origin ? { origin } : {}), ...(desc.loop ? { loop: "1", playlist: desc.yt } : {}) });
+        box.append(h("iframe", { src: `https://www.youtube-nocookie.com/embed/${desc.yt}?${params}`, title: desc.name || "動画", allow: "autoplay; encrypted-media; picture-in-picture; fullscreen", allowfullscreen: true, loading: "lazy", referrerpolicy: "strict-origin-when-cross-origin", "data-autoplay": desc.autoplay ? "" : null }));
       } else {
         box.append(h("img", { src: `https://i.ytimg.com/vi/${desc.yt}/hqdefault.jpg`, alt: "", draggable: "false" }), h("span", { class: "hs-play-badge" }, icon("play")));
       }
