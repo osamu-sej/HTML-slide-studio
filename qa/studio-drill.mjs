@@ -173,6 +173,48 @@ if (exported) {
   });
 }
 
+await step("details: the item is marked 「＋ 詳しく」 on its text line, and × closes the card", async () => {
+  // The slide from the report: a pyramid whose bottom level opens a card.
+  const pyramidDeck = { title: "生成AIの歩みとこれから", theme: "editorial", transition: "fade", motion: {}, memo: "", slides: [
+    { type: "title", title: "生成AIの歩みとこれから" },
+    { type: "pyramid", title: "将来の活用を支える層", takeaway: "将来の競争力は、技術よりも**運用を積み上げる力**で差がつく。",
+      levels: [{ title: "継続改善", description: "利用結果を振り返り、更新し続ける。" }, { title: "運用設計", description: "目的、担当、確認手順を決める。" }, { title: "ルール整備", description: "入力してよい情報を定める。" }],
+      details: [{ target: "levels[2]", title: "ルール整備の範囲", text: "入力してよい情報、確認すべき出力、承認が必要な用途を明確にします。" }] },
+    { type: "closing", message: "次のアクション" },
+  ] };
+  await page.evaluate((value) => localStorage.setItem("hs-studio-current-v1", JSON.stringify({ deck: value, selected: 1, savedAt: new Date().toISOString() })), pyramidDeck);
+  await page.goto(base);
+  await page.waitForSelector(".film-item");
+  await page.click(".film-item:nth-child(2)");
+  await page.click("#presentBtn");
+  await page.waitForSelector('#presenter .hs-slide[data-type="pyramid"]');
+  for (let i = 0; i < 3; i += 1) { await page.keyboard.press("ArrowRight"); await page.waitForTimeout(200); }
+  await page.waitForSelector("#presenter .hs-player-flash", { timeout: 4000 });
+  const hint = await page.textContent("#presenter .hs-player-flash");
+  if (!/「＋ 詳しく」の付いた項目はクリックできます/.test(hint)) throw new Error(`hint: ${hint}`);
+  await page.waitForTimeout(800);
+  const mark = page.locator("#presenter .hs-detail-badge");
+  const box = await mark.boundingBox();
+  if (!box || box.width < 80) throw new Error(`the mark is not shown in full: ${JSON.stringify(box)}`);
+  if ((await mark.evaluate((el) => el.parentElement.tagName)) !== "LI") throw new Error("the mark is not on the text line");
+  // Marks let clicks through to their item; for this look only, let the browser find the mark itself.
+  const hit = await page.evaluate(({ x, y }) => {
+    const mark = document.querySelector("#presenter .hs-detail-badge");
+    mark.style.pointerEvents = "auto";
+    const found = document.elementFromPoint(x, y)?.closest(".hs-detail-badge") === mark;
+    mark.style.pointerEvents = "";
+    return found;
+  }, { x: box.x + box.width / 2, y: box.y + box.height / 2 });
+  if (!hit) throw new Error("the mark is covered or clipped");
+  await shot("details-mark");
+  await page.locator('#presenter li[data-detail]').click();
+  await page.waitForSelector("#presenter .hs-popover");
+  await page.click("#presenter .hs-popover-close");
+  await page.waitForSelector("#presenter .hs-popover", { state: "detached", timeout: 3000 });
+  if ((await page.getAttribute("#presenter .hs-player-slide .hs-slide", "data-type")) !== "pyramid") throw new Error("× moved to another slide");
+  await page.keyboard.press("Escape");
+});
+
 console.log(errors.length ? `errors:\n${errors.join("\n")}` : "no errors");
 await browser.close();
 process.exit(errors.length ? 1 : 0);

@@ -1395,12 +1395,21 @@
       const targets = [...root.querySelectorAll(`[data-item="${cssEscape(detail.target)}"]`)];
       if (!targets.length) continue;
       for (const el of targets) el.dataset.detail = detail.target;
-      const host = targets.find((el) => !(el instanceof SVGElement)) || null;
-      if (!host) continue;
-      const anchor = host.tagName === "TR" ? host.cells[host.cells.length - 1] : host;
-      if (getComputedStyleSafe(anchor) === "static") anchor.style.position = "relative";
-      anchor.append(h("span", { class: "hs-detail-badge", style: { top: "-18px", right: "-18px" }, "aria-hidden": "true" }, plusIcon()));
+      badgeAnchor(targets)?.append(h("span", { class: "hs-detail-badge", "aria-hidden": "true" }, plusIcon(), h("span", { class: "hs-badge-label" }, "詳しく")));
     }
+  }
+
+  /**
+   * Where an item's mark goes. When a shape and a line of text both show the item (pyramids, funnels, Venn
+   * diagrams), the mark sits on the text: shapes are clipped to their outline and would cut it off.
+   */
+  function badgeAnchor(targets) {
+    const html = targets.filter((el) => !(el instanceof SVGElement));
+    const host = html.find((el) => el.tagName === "LI") || html[0];
+    if (!host) return null;
+    const anchor = host.tagName === "TR" ? host.cells[host.cells.length - 1] : host;
+    if (getComputedStyleSafe(anchor) === "static") anchor.style.position = "relative";
+    return anchor;
   }
 
   /** Items with a deep-dive page get an arrow badge; clicking them in a presentation opens that page. */
@@ -1409,12 +1418,10 @@
       const targets = [...root.querySelectorAll(`[data-item="${cssEscape(drill.target)}"]`)];
       if (!targets.length) continue;
       for (const el of targets) el.dataset.drill = String(drill.index);
-      const host = targets.find((el) => !(el instanceof SVGElement)) || null;
-      if (!host) continue;
-      const anchor = host.tagName === "TR" ? host.cells[host.cells.length - 1] : host;
-      if (getComputedStyleSafe(anchor) === "static") anchor.style.position = "relative";
+      const anchor = badgeAnchor(targets);
+      if (!anchor) continue;
       [...anchor.children].find((child) => child.classList?.contains("hs-detail-badge"))?.remove();
-      anchor.append(h("span", { class: "hs-drill-badge", "data-drill-to": String(drill.index), title: "クリックで深掘りページへ", "aria-hidden": "true" }, drillIcon()));
+      anchor.append(h("span", { class: "hs-drill-badge", "data-drill-to": String(drill.index), title: "クリックで深掘りページへ", "aria-hidden": "true" }, drillIcon(), h("span", { class: "hs-badge-label" }, "深掘り")));
     }
   }
 

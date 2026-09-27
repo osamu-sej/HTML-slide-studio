@@ -118,7 +118,7 @@
     const walk = (node) => {
       for (const child of [...node.childNodes]) {
         if (child.nodeType === 3) { if (child.data) child.replaceWith(wrap(child.data)); }
-        else if (child.nodeType === 1 && child.namespaceURI === "http://www.w3.org/1999/xhtml" && !child.classList.contains("hs-detail-badge")) walk(child);
+        else if (child.nodeType === 1 && child.namespaceURI === "http://www.w3.org/1999/xhtml" && !child.classList.contains("hs-detail-badge") && !child.classList.contains("hs-drill-badge")) walk(child);
       }
     };
     walk(el);
@@ -427,7 +427,8 @@
         event.stopPropagation();
         if (anim.isPaused) anim.play(); else anim.pause();
       }
-      if (event.target.closest?.("iframe, .hs-popover")) event.stopPropagation();
+      // Clicks inside the card reach its buttons (×); the card itself keeps them from advancing the slide.
+      if (event.target.closest?.("iframe")) event.stopPropagation();
     };
     slide.addEventListener("pointerover", onOver);
     slide.addEventListener("pointermove", onMove);
@@ -489,6 +490,7 @@
     let origin = null;
     // While a deep-dive page is shown: the slide (and build step) to go back to, and where it was opened from.
     let back = null;
+    let hinted = false;
     const started = Date.now();
 
     const stage = h("div", { class: "hs-player-stage" });
@@ -555,6 +557,9 @@
         play(slide, { step, animate: atStep == null });
         interaction = activate(slide, { details: slides[i]?.details || [], onDrill: back ? null : (to, el) => openDrill(to, el) });
         playMedia(slide, { sound: gesture });
+        // The first slide with clickable items says how to use them (once per presentation).
+        const kinds = [slide.querySelector(".hs-detail-badge") ? "「＋ 詳しく」" : "", slide.querySelector(".hs-drill-badge") ? "「↗ 深掘り」" : ""].filter(Boolean).join("・");
+        if (kinds && !hinted) { hinted = true; setTimeout(() => flash(`${kinds}の付いた項目はクリックできます`), 900); }
       };
       if (type === "morph" && doc.startViewTransition) {
         nameShared(prevScaler, true);

@@ -251,3 +251,16 @@ test("deep-dive pages: outside the story, numbered by their slide, opened from a
   assert.equal(page.querySelectorAll("[data-drill]").length, 0, "one level: a deep-dive page opens nothing further");
   assert.equal(E.render(slides[3], { deck, index: 3, mode: "thumb" }).querySelector(".hs-page").textContent, "03 / 04");
 });
+
+test("clickable items say so: labelled marks on the text line, not clipped inside a shape", async () => {
+  const { E } = await loadEngine();
+  const pyramid = { type: "pyramid", title: "支える層", takeaway: "運用で差がつく", levels: [{ title: "改善", description: "a" }, { title: "設計", description: "b" }, { title: "ルール", description: "c" }], details: [{ target: "levels[2]", title: "範囲", text: "入力してよい情報" }] };
+  const slides = [{ type: "title", title: "表紙" }, pyramid, { type: "content", title: "設計の中身", takeaway: "担当を決める", points: ["a"], drillOf: "levels[1]" }, { type: "closing", message: "以上" }];
+  const el = E.render(pyramid, { deck: deckOf(slides), index: 1, mode: "present" });
+  const detail = el.querySelector(".hs-detail-badge");
+  assert.equal(detail.parentElement.tagName, "LI", "the mark sits on the text line, not on the clipped pyramid layer");
+  assert.equal(detail.textContent, "詳しく");
+  const drill = el.querySelector(".hs-drill-badge");
+  assert.equal(drill.parentElement.tagName, "LI");
+  assert.equal(drill.textContent, "深掘り");
+});
