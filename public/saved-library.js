@@ -2,7 +2,7 @@ const DB_NAME = "html-slide-studio-library";
 const STORE = "decks";
 const SKIP_FIELDS = new Set([
   "media", "customImage", "src", "visualAsset", "imagePlacement", "photoMotion",
-  "animation", "kinetic", "backdrop", "icon", "type",
+  "animation", "kinetic", "backdrop", "entrance", "emphasis", "icon", "type",
   "chartType", "fit", "kind", "imagePosition", "target", "theme", "transition",
 ]);
 

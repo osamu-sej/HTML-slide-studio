@@ -51,6 +51,13 @@ test("Codex output schemas satisfy strict structured-output rules", () => {
   assert.match(chat, /"motion"/);
   assert.match(chat, /"wipe"/);
   assert.match(chat, /"circle"/);
+  // More motion types: each slide may pick its own entrance, emphasis and transition; chat may change the deck's.
+  for (const schema of [codexDeckSchema, codexChatSchema, codexSlideSchema, codexVariantsSchema]) {
+    const text = JSON.stringify(schema);
+    for (const key of ["entrance", "emphasis", "transition", "spotlight", "confetti", "curtain", "drift"]) assert.match(text, new RegExp(`"${key}"`), key);
+  }
+  const motion = codexChatSchema.properties.motion.anyOf.find((option) => option.type === "object");
+  assert.deepEqual(Object.keys(motion.properties).sort(), ["backdrop", "draw", "emphasis", "entrance", "hover", "kinetic"]);
   assert.equal(codexSlideSchema.type, "object");
   assert.equal(SLIDE_TYPES.length, 42);
   assert.ok(SLIDE_TYPES.includes("hero") && SLIDE_TYPES.includes("statement"));

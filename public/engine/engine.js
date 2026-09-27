@@ -62,7 +62,8 @@
   const CASCADE = new Set(["cards", "headerCards", "bulletCards", "kpi", "dashboard", "grid2x2", "swot", "matrix", "triangle", "venn", "orgChart",
     "checklist", "faq", "agenda", "executiveSummary", "headerTwoColumn", "headerThreeSummary", "statsCompare", "compare", "beforeAfter", "diagram", "content"]);
   const STILL = new Set(["title", "section", "closing", "hero", "statement"]);
-  const BUILDS = ["auto", "none", "fade", "cascade", "click"];
+  // spotlight: everything is on screen, and each click puts one item in focus while the rest step back.
+  const BUILDS = ["auto", "none", "fade", "cascade", "click", "spotlight"];
   function recommendedBuild(type) {
     if (STILL.has(type)) return "none";
     if (CLICK.has(type)) return "click";
@@ -72,8 +73,30 @@
 
   // Motion graphics: the big lines set themselves in motion (kinetic type), a graphic moves behind the slide
   // (backdrop), and icons, connectors and markers draw themselves. Stage slides (STILL) get them by default.
-  const KINETIC = { mask: "マスクから立ち上がる", words: "ことばごとに浮かぶ", chars: "1文字ずつ弾む", type: "タイプライター", scramble: "デコード（文字が入れ替わって決まる）" };
-  const BACKDROPS = { particles: "粒子が昇る", waves: "波が流れる", grid: "グリッドと走査線", orbits: "軌道を回る", gradient: "色がゆらぐ", lines: "線を光が流れる", shapes: "図形が漂う" };
+  const KINETIC = {
+    mask: "マスクから立ち上がる", words: "ことばごとに浮かぶ", chars: "1文字ずつ弾む", type: "タイプライター", scramble: "デコード（文字が入れ替わって決まる）",
+    wave: "波打って並ぶ", zoom: "手前から迫る", flip: "1文字ずつめくれる", slide: "横から滑り込む",
+  };
+  const BACKDROPS = {
+    particles: "粒子が昇る", waves: "波が流れる", grid: "グリッドと走査線", orbits: "軌道を回る", gradient: "色がゆらぐ", lines: "線を光が流れる", shapes: "図形が漂う",
+    confetti: "紙吹雪が舞う", network: "ネットワークがつながる", ripple: "波紋が広がる", stars: "星がまたたく", rays: "光の筋が回る",
+  };
+  // How a slide's parts arrive (deck-wide, or per slide), how items answer the mouse, and how the one
+  // emphasized phrase (**語句**) is set off.
+  const ENTRANCES = {
+    rise: "下から浮かび上がる", fade: "ふわっと現れる", blur: "ぼかしから現れる", pop: "はじけるように現れる",
+    slide: "左から滑り込む", zoom: "手前から迫ってくる", flip: "めくれるように現れる", wipe: "幕が開くように現れる", drop: "弾んで落ちてくる",
+  };
+  const HOVERS = { lift: "項目が浮き上がる", focus: "乗せた項目以外を薄くする", tilt: "3Dで傾く", glow: "光で縁取る", zoom: "少し大きくなる" };
+  const EMPHASES = { marker: "マーカーを引く", underline: "下線を引く", circle: "手書きの丸で囲む", box: "枠で囲む", glow: "光らせる", none: "色だけ（飾りなし）" };
+  const TRANSITIONS = {
+    fade: "フェード", slide: "スライド（横に流れる）", zoom: "ズーム", morph: "モーフ（見出しがつながって動く）",
+    wipe: "ワイプ（色の帯が横切る）", circle: "サークル（クリックした所から広がる）", push: "押し上げ（下から押し出す）",
+    flip: "めくる（カードのように裏返る）", dive: "奥へ（飛び込むように進む）", blinds: "ブラインド（縞が開く）", curtain: "幕（中央から左右に開く）", none: "なし",
+  };
+  const PHOTO_MOTIONS = { zoom: "ゆっくりズーム", pan: "ゆっくり横に流す", float: "ふわふわ浮かぶ", parallax: "マウスに合わせて奥行き", reveal: "幕が開くように現れる", drift: "斜めにゆっくり流れる", tilt: "ゆっくり傾く（3D）" };
+
+  const pick = (catalog, ...values) => values.find((value) => value === "none" || Object.hasOwn(catalog, value));
 
   /** The kinetic style a slide's big text plays with, or null. */
   function kineticOf(slide, type, motion = {}) {
@@ -211,7 +234,7 @@
   /** The photo or video a slide shows: uploaded media first, then a built-in photo. */
   function mediaOf(slide, ctx) {
     const media = slide.media && typeof slide.media === "object" ? slide.media : null;
-    const motion = ["zoom", "pan", "float", "parallax"].includes(slide.photoMotion) ? slide.photoMotion : "none";
+    const motion = Object.hasOwn(PHOTO_MOTIONS, slide.photoMotion ?? "") ? slide.photoMotion : "none";
     if (media?.src) {
       const yt = youtubeId(media.src);
       const kind = yt ? "youtube"
@@ -1166,6 +1189,44 @@
         box.append(h("i", { class: ["hs-bd-shape", ["", "c2", "c3"][i % 3]], style: { left: `${x.toFixed(1)}%`, top: `${y.toFixed(1)}%`, "--sz": px(r(48, 96)), "--rot": `${Math.round(r(0, 360))}deg`, "--t": sec(r(6, 11)), "--dl": sec(-r(0, 11)) } },
           s("svg", { viewBox: "0 0 100 100" }, SHAPES[shape]())));
       });
+    } else if (kind === "confetti") {
+      // Pieces fall from above the slide; `--y` only places them for still pictures (thumbnails, prints).
+      for (let i = 0; i < 46; i += 1) {
+        box.append(h("i", { class: ["hs-bd-conf", ["strip", "square", "dot"][i % 3], `c${1 + (i % 5)}`], style: {
+          left: `${r(0, 99).toFixed(1)}%`, "--y": `${r(-4, 94).toFixed(1)}%`, "--rot": `${Math.round(r(0, 360))}deg`,
+          "--spin": `${Math.round(r(360, 1080)) * (rnd() < 0.5 ? -1 : 1)}deg`, "--sway": px(r(-140, 140)), "--t": sec(r(7, 13)), "--dl": sec(-r(0, 13)),
+        } }));
+      }
+    } else if (kind === "network") {
+      // Nodes on the right, each tied to its two nearest neighbours; light runs along the ties.
+      const nodes = Array.from({ length: 16 }, () => [r(940, 1860), r(90, 990)]);
+      const svg = s("svg", { viewBox: "0 0 1920 1080", preserveAspectRatio: "none" });
+      const tied = new Set();
+      nodes.forEach(([x, y], i) => {
+        const near = nodes.map(([x2, y2], j) => [Math.hypot(x - x2, y - y2), j]).filter(([, j]) => j !== i).sort((a, b) => a[0] - b[0]).slice(0, 2);
+        for (const [, j] of near) {
+          const key = i < j ? `${i}-${j}` : `${j}-${i}`;
+          if (tied.has(key)) continue;
+          tied.add(key);
+          const d = `M${x.toFixed(0)},${y.toFixed(0)} L${nodes[j][0].toFixed(0)},${nodes[j][1].toFixed(0)}`;
+          svg.append(s("path", { class: "edge", d }), s("path", { class: "pulse", d, pathLength: 100, style: { "--t": sec(r(2.4, 4.8)), "--dl": sec(-r(0, 4.8)) } }));
+        }
+      });
+      nodes.forEach(([x, y], i) => svg.append(s("circle", { class: i % 4 === 0 ? "node hub" : "node", cx: x.toFixed(0), cy: y.toFixed(0), r: i % 4 === 0 ? 13 : 7, style: { "--dl": sec(-r(0, 4)) } })));
+      box.append(svg);
+    } else if (kind === "ripple") {
+      const ripple = h("div", { class: "hs-bd-ripple" });
+      for (let i = 0; i < 5; i += 1) ripple.append(h("i", { style: { "--i": i, "--dl": sec(-i * 1.7) } }));
+      ripple.append(h("b"));
+      box.append(ripple);
+    } else if (kind === "stars") {
+      for (let i = 0; i < 84; i += 1) {
+        const big = rnd() < 0.12;
+        box.append(h("i", { class: ["hs-bd-star", big ? "big" : ""], style: { left: `${r(0, 100).toFixed(1)}%`, top: `${r(0, 100).toFixed(1)}%`, "--o": r(0.3, 0.95).toFixed(2), "--t": sec(r(1.8, 5)), "--dl": sec(-r(0, 5)) } }));
+      }
+      for (let i = 0; i < 2; i += 1) box.append(h("b", { class: "hs-bd-shoot", style: { left: `${r(40, 88).toFixed(1)}%`, top: `${r(2, 28).toFixed(1)}%`, "--dl": sec(i * 4.6 + r(0, 2)) } }));
+    } else if (kind === "rays") {
+      box.append(h("div", { class: "hs-bd-rays" }));
     }
     return box;
   }
@@ -1309,8 +1370,10 @@
     const root = h("div", {
       class: ["hs-slide", mode === "thumb" || mode === "print" ? "hs-static" : "", mode === "edit" ? "hs-editable" : "", mode === "print" ? "hs-print" : "", live ? "hs-live" : "", motion.numbers !== false ? "hs-numbers" : "", STILL.has(type) ? "hs-stage" : "", drillParent != null ? "hs-drill" : ""],
       "data-theme": theme, "data-type": type, "data-build": build, "data-tone": meta.dark ? "dark" : "light",
-      "data-entrance": ["fade", "blur", "pop", "none"].includes(motion.entrance) ? motion.entrance : "rise",
-      "data-hover": ["lift", "focus", "none"].includes(motion.hover) ? motion.hover : "lift",
+      // A slide may choose its own entrance and emphasis; otherwise the deck's apply.
+      "data-entrance": pick(ENTRANCES, slide?.entrance, motion.entrance) || "rise",
+      "data-hover": pick(HOVERS, motion.hover) || "lift",
+      "data-emphasis": pick(EMPHASES, slide?.emphasis, motion.emphasis) || "marker",
       "data-ambient": motion.ambient === false ? "off" : "on",
       "data-draw": motion.draw === false ? "off" : "on",
       "data-kinetic": kinetic, "data-backdrop": backdropKind,
@@ -1385,7 +1448,7 @@
         el.style.setProperty("--g", String(flat ? 0 : g));
       }
     });
-    root.dataset.steps = String(build === "click" ? keys.length : 0);
+    root.dataset.steps = String(build === "click" || build === "spotlight" ? keys.length : 0);
   }
 
   /** Items with "click for details" text get a badge and open a card when clicked in a presentation. */
@@ -1559,7 +1622,7 @@
 
   const Engine = root.SlideEngine || {};
   Object.assign(Engine, {
-    W, H, THEMES, PHOTOS, TYPE_LABELS, BUILDS, KINETIC, BACKDROPS, LAYOUT_TYPES: [...Object.keys(FULL), "hero", ...Object.keys(LAYOUTS)].filter((v, i, a) => a.indexOf(v) === i),
+    W, H, THEMES, PHOTOS, TYPE_LABELS, BUILDS, KINETIC, BACKDROPS, ENTRANCES, HOVERS, EMPHASES, TRANSITIONS, PHOTO_MOTIONS, LAYOUT_TYPES: [...Object.keys(FULL), "hero", ...Object.keys(LAYOUTS)].filter((v, i, a) => a.indexOf(v) === i),
     get icons() { return ICONS; },
     setIcons(map) { ICONS = map || {}; },
     render, mount, fit, scale, fontHref, recommendedBuild, kineticOf, backdropOf, repaintCharts, mediaOf, youtubeId, numParts, splitLabel, strip, rich, icon, h, s, cssEscape, storyMap,

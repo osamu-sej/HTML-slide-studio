@@ -160,7 +160,7 @@ test("kinetic type splits the big lines without changing their text or line-brea
   const { E } = await loadEngine();
   const slide = { type: "statement", title: "目指すこと", text: "毎月**1,440時間**を、考える仕事へ。AI活用" };
   const deck = deckOf([{ type: "title", title: "t" }, slide, { type: "closing" }]);
-  for (const mode of ["mask", "words", "chars", "type"]) {
+  for (const mode of ["mask", "words", "chars", "type", "wave", "zoom", "flip", "slide"]) {
     const el = E.render({ ...slide, kinetic: mode }, { deck, index: 1, mode: "present" });
     const text = el.querySelector(".hs-statement-text");
     const before = text.textContent;
@@ -174,10 +174,67 @@ test("kinetic type splits the big lines without changing their text or line-brea
     assert.match(text.style.getPropertyValue("--kst"), /^\d+ms$/);
     assert.equal(units.at(-1).classList.contains("hs-k-last"), true);
     if (mode === "mask") assert.ok(text.querySelector(".hs-km > .hs-k"), "mask: each unit rises from behind its own edge");
-    if (mode === "chars") assert.deepEqual([...text.querySelectorAll(".hs-kw")].map((word) => word.textContent), ["1,440", "AI"], "chars: Latin words and figures do not break");
+    if (["chars", "wave", "flip"].includes(mode)) assert.deepEqual([...text.querySelectorAll(".hs-kw")].map((word) => word.textContent), ["1,440", "AI"], `${mode}: Latin words and figures do not break`);
+    if (["zoom", "slide"].includes(mode)) assert.ok(units.length < [...before].length / 2, `${mode}: moves word by word`);
     E.play(el);
     assert.equal(text.querySelectorAll(".hs-k").length, units.length, `${mode}: playing again does not split twice`);
   }
+});
+
+test("more motion types: entrances, hovers, emphasis, spotlight and photo motion, per deck and per slide", async () => {
+  const { E } = await loadEngine();
+  const schemas = await import("../server/schemas.mjs");
+  // The AI chooses from the same lists the engine can play.
+  assert.deepEqual(Object.keys(E.KINETIC), schemas.KINETIC_STYLES);
+  assert.deepEqual(Object.keys(E.BACKDROPS), schemas.BACKDROP_KINDS);
+  assert.deepEqual(Object.keys(E.ENTRANCES), schemas.ENTRANCES);
+  assert.deepEqual(Object.keys(E.HOVERS), schemas.HOVERS);
+  assert.deepEqual(Object.keys(E.EMPHASES), schemas.EMPHASES);
+  assert.deepEqual(Object.keys(E.TRANSITIONS), schemas.TRANSITIONS);
+  assert.deepEqual(Object.keys(E.PHOTO_MOTIONS), schemas.PHOTO_MOTIONS);
+  assert.deepEqual([...E.BUILDS], schemas.BUILDS);
+
+  const slides = [
+    { type: "title", title: "表紙" },
+    { type: "cards", title: "選択肢", takeaway: "**B案**を選ぶ", items: [{ title: "A" }, { title: "B" }, { title: "C" }] },
+    { type: "hero", title: "全面写真", visualAsset: "ai", photoMotion: "drift" },
+    { type: "closing", message: "以上" },
+  ];
+  const deck = deckOf(slides, { motion: { entrance: "zoom", hover: "tilt", emphasis: "circle" } });
+  const cards = E.render(slides[1], { deck, index: 1, mode: "present" });
+  assert.equal(cards.dataset.entrance, "zoom");
+  assert.equal(cards.dataset.hover, "tilt");
+  assert.equal(cards.dataset.emphasis, "circle");
+  assert.ok(cards.querySelector(".hs-em"), "the phrase to emphasise is marked");
+  const own = E.render({ ...slides[1], entrance: "drop", emphasis: "box" }, { deck, index: 1, mode: "present" });
+  assert.equal(own.dataset.entrance, "drop", "a slide may pick its own entrance");
+  assert.equal(own.dataset.emphasis, "box");
+  assert.equal(E.render({ ...slides[1], entrance: "none" }, { deck, index: 1, mode: "present" }).dataset.entrance, "none");
+  const unknown = E.render({ ...slides[1], entrance: "spin", emphasis: "sparkle" }, { deck: deckOf(slides, { motion: { hover: "wobble" } }), index: 1, mode: "present" });
+  assert.equal(unknown.dataset.entrance, "rise", "unknown values fall back to the defaults");
+  assert.equal(unknown.dataset.emphasis, "marker");
+  assert.equal(unknown.dataset.hover, "lift");
+
+  // Spotlight: everything stays on screen, and each click puts one item in focus.
+  const spot = E.render({ ...slides[1], animation: "spotlight" }, { deck, index: 1, mode: "present" });
+  assert.equal(spot.dataset.build, "spotlight");
+  assert.equal(Number(spot.dataset.steps), 3, "one click per item");
+  E.play(spot, { step: 0, animate: false });
+  assert.equal(spot.querySelectorAll(".hs-hidden").length, 0, "nothing is hidden");
+  assert.ok(!spot.classList.contains("hs-spotting"));
+  E.reveal(spot, 2);
+  assert.ok(spot.classList.contains("hs-spotting"));
+  assert.deepEqual([...spot.querySelectorAll(".hs-spot")].map((el) => el.dataset.g), [...spot.querySelectorAll('[data-g="1"]')].map((el) => el.dataset.g));
+  assert.ok(spot.querySelector('[data-g="1"].hs-spot'), "the second item is in focus");
+  assert.equal(spot.querySelector('[data-g="0"].hs-spot'), null);
+  E.play(spot, { step: 3, animate: false });
+  assert.ok(spot.querySelector('[data-g="2"].hs-spot'), "stepping back lands on the right item");
+
+  for (const motion of Object.keys(E.PHOTO_MOTIONS)) {
+    const hero = E.render({ ...slides[2], photoMotion: motion }, { deck, index: 2, mode: "present" });
+    assert.equal(hero.querySelector(".hs-media").dataset.motion, motion);
+  }
+  assert.equal(E.render({ ...slides[2], photoMotion: "shake" }, { deck, index: 2, mode: "present" }).querySelector(".hs-media").dataset.motion, undefined, "an unknown photo motion stays still");
 });
 
 test("Lottie animations: a player box when shown, a badge in thumbnails", async () => {

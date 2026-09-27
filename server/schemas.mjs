@@ -35,17 +35,25 @@ export const mediaSchema = z.object({
 });
 export const ICONS = Object.fromEntries(Object.entries(JSON.parse(readFileSync(new URL("../public/engine/icons.json", import.meta.url), "utf8"))).map(([key, value]) => [key, value.label]));
 export const iconSchema = z.enum(Object.keys(ICONS));
-// How the slide's items appear when presented: auto (by layout), none, fade (all at once), cascade (one after another), click (one per click).
-export const animationSchema = z.enum(["auto", "none", "fade", "cascade", "click"]);
+// The kinds of motion mirror the catalogs in public/engine/engine.js (test/engine.test.js checks they agree).
+// How the slide's items appear when presented: auto (by layout), none, fade (all at once), cascade (one after another),
+// click (one per click), spotlight (all shown; each click brings one forward).
+export const BUILDS = ["auto", "none", "fade", "cascade", "click", "spotlight"];
+export const animationSchema = z.enum(BUILDS);
 // Motion on the slide's photo while it is shown.
-export const photoMotionSchema = z.enum(["none", "zoom", "pan", "float", "parallax"]);
-// Motion graphics (see KINETIC and BACKDROPS in public/engine/engine.js): how the big text sets itself in motion,
-// and the moving graphic behind the slide. "auto" follows the deck (cover, chapters, statements, the close).
-export const KINETIC_STYLES = ["mask", "words", "chars", "type", "scramble"];
-export const BACKDROP_KINDS = ["particles", "waves", "grid", "orbits", "gradient", "lines", "shapes"];
+export const PHOTO_MOTIONS = ["zoom", "pan", "float", "parallax", "reveal", "drift", "tilt"];
+export const photoMotionSchema = z.enum(["none", ...PHOTO_MOTIONS]);
+// Motion graphics: how the big text sets itself in motion, and the moving graphic behind the slide.
+// "auto" follows the deck (cover, chapters, statements, the close).
+export const KINETIC_STYLES = ["mask", "words", "chars", "type", "scramble", "wave", "zoom", "flip", "slide"];
+export const BACKDROP_KINDS = ["particles", "waves", "grid", "orbits", "gradient", "lines", "shapes", "confetti", "network", "ripple", "stars", "rays"];
 export const kineticSchema = z.enum(["auto", "none", ...KINETIC_STYLES]);
 export const backdropSchema = z.enum(["auto", "none", ...BACKDROP_KINDS]);
-export const TRANSITIONS = ["none", "fade", "slide", "zoom", "morph", "wipe", "circle"];
+// How a slide's parts arrive, how items answer the mouse, how the **phrase** is set off, and how slides change.
+export const ENTRANCES = ["rise", "fade", "blur", "pop", "slide", "zoom", "flip", "wipe", "drop"];
+export const HOVERS = ["lift", "focus", "tilt", "glow", "zoom"];
+export const EMPHASES = ["marker", "underline", "circle", "box", "glow", "none"];
+export const TRANSITIONS = ["fade", "slide", "zoom", "morph", "wipe", "circle", "push", "flip", "dive", "blinds", "curtain", "none"];
 export const transitionSchema = z.enum(TRANSITIONS);
 // Presentations only: text that opens when an item ("items[0]", "steps[2]") is clicked.
 export const detailSchema = z.object({
@@ -63,6 +71,10 @@ const shared = {
   animation: animationSchema.optional(),
   kinetic: kineticSchema.optional(),
   backdrop: backdropSchema.optional(),
+  // This slide's own entrance, emphasis and way in (the deck's apply when left out).
+  entrance: z.enum(["auto", "none", ...ENTRANCES]).optional(),
+  emphasis: z.enum(["auto", ...EMPHASES]).optional(),
+  transition: z.enum(["auto", ...TRANSITIONS]).optional(),
   // A deep-dive page: not part of the story, opened by clicking this item ("items[1]") of the slide above.
   drillOf: z.string().max(30).optional(),
   notes: notesSchema,
@@ -148,14 +160,18 @@ export const slideSchema = z.discriminatedUnion("type", [
 
 export const THEMES = ["clarity", "midnight", "editorial", "mono", "forest", "sunset", "aurora", "kinari"];
 export const themeSchema = z.enum(THEMES);
-export const deckMotionSchema = z.object({
-  entrance: z.enum(["rise", "fade", "blur", "pop", "none"]).optional(),
-  hover: z.enum(["lift", "focus", "none"]).optional(),
-  numbers: z.boolean().optional(),
-  ambient: z.boolean().optional(),
+const motionFields = {
+  entrance: z.enum([...ENTRANCES, "none"]).optional(),
+  hover: z.enum([...HOVERS, "none"]).optional(),
   kinetic: z.enum(["none", ...KINETIC_STYLES]).optional(),
   backdrop: z.enum(["none", ...BACKDROP_KINDS]).optional(),
+  emphasis: z.enum(EMPHASES).optional(),
   draw: z.boolean().optional(),
+};
+export const deckMotionSchema = z.object({
+  ...motionFields,
+  numbers: z.boolean().optional(),
+  ambient: z.boolean().optional(),
 });
 
 export const defaultSettings = studioSettingsSchema.parse({});
@@ -220,7 +236,7 @@ export const chatResultSchema = z.object({
   theme: themeSchema.optional(),
   transition: transitionSchema.optional(),
   // Deck-wide motion graphics, only when asked ("全体をもっと動かして", "表紙と章扉に動く背景を").
-  motion: z.object({ kinetic: z.enum(["none", ...KINETIC_STYLES]).optional(), backdrop: z.enum(["none", ...BACKDROP_KINDS]).optional(), draw: z.boolean().optional() }).optional(),
+  motion: z.object(motionFields).optional(),
   suggestions: z.array(z.string().min(1).max(60)).max(3),
 });
 

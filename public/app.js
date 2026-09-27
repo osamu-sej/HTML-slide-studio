@@ -40,19 +40,26 @@ const themeMeta = (id) => E.THEMES.find((theme) => theme.id === id) ?? E.THEMES[
 const SLOTTED = new Set(["title", "section", "closing", "hero", "statement", "content", "quote", "imageText"]);
 const ICON_TYPES = new Set(["cards", "headerCards", "bulletCards", "triangle", "orgChart", "grid2x2", "headerTwoColumn", "headerThreeSummary"]);
 const DEFAULT_PLACEMENT = { x: 0.6, y: 0.3, w: 0.32, h: 0.46 };
-const DEFAULT_MOTION = { entrance: "rise", hover: "lift", numbers: true, ambient: true, kinetic: "mask", backdrop: "none", draw: true };
-const TRANSITIONS = ["none", "fade", "slide", "zoom", "morph", "wipe", "circle"];
+const DEFAULT_MOTION = { entrance: "rise", hover: "lift", numbers: true, ambient: true, kinetic: "mask", backdrop: "none", emphasis: "marker", draw: true };
+// Every kind of motion comes from the engine's catalogs (public/engine/engine.js), so the studio, the AI and
+// the player always agree on what exists.
+const TRANSITIONS = Object.keys(E.TRANSITIONS);
 // Motion graphics: the big lines' motion (kinetic) and the moving graphic behind a slide (backdrop).
 const KINETIC_INFO = { auto: "おまかせ（資料の設定）", none: "動かさない", ...E.KINETIC };
 const BACKDROP_INFO = { auto: "おまかせ（資料の設定）", none: "なし", ...E.BACKDROPS };
+// What one slide can choose for itself ("auto" follows the deck).
+const ENTRANCE_INFO = { auto: "おまかせ（資料の設定）", ...E.ENTRANCES, none: "動かさない" };
+const EMPHASIS_INFO = { auto: "おまかせ（資料の設定）", ...E.EMPHASES };
+const SLIDE_TRANSITION_INFO = { auto: "おまかせ（資料の設定）", ...E.TRANSITIONS };
 const BUILD_INFO = {
   auto: ["おまかせ", "レイアウトに合わせて自動で選びます"],
   none: ["なし", "最初からすべて表示します"],
   fade: ["まとめて", "スライドが出るとき、中身がまとめて現れます"],
   cascade: ["順番に", "項目が少しずつ時間差で現れます"],
   click: ["クリックで", "クリック（→キー）のたびに1項目ずつ出ます。説明しながら見せたいときに"],
+  spotlight: ["順に注目", "全部見せたまま、クリックのたびに1項目を強調し、ほかを薄くします。一覧を見せながら1つずつ話すときに"],
 };
-const PHOTO_MOTIONS = [["none", "動かさない"], ["zoom", "ゆっくりズーム"], ["pan", "ゆっくり横に流す"], ["float", "ふわふわ浮かぶ"], ["parallax", "マウスに合わせて奥行き"]];
+const PHOTO_MOTIONS = [["none", "動かさない"], ...Object.entries(E.PHOTO_MOTIONS)];
 const DENSITY_LABEL = { light: "少なめ", standard: "標準", rich: "多め" };
 
 const SAMPLES = [
@@ -442,8 +449,10 @@ function normalizeSlide(raw, index, total) {
   if (slide.animation && !E.BUILDS.includes(slide.animation)) delete slide.animation;
   if (slide.animation === "auto") delete slide.animation;
   if (slide.photoMotion && !PHOTO_MOTIONS.some(([value]) => value === slide.photoMotion)) delete slide.photoMotion;
-  if (slide.kinetic != null && (!KINETIC_INFO[slide.kinetic] || slide.kinetic === "auto")) delete slide.kinetic;
-  if (slide.backdrop != null && (!BACKDROP_INFO[slide.backdrop] || slide.backdrop === "auto")) delete slide.backdrop;
+  // A slide's own motion: unknown values and "auto" (follow the deck) are dropped.
+  for (const [key, info] of [["kinetic", KINETIC_INFO], ["backdrop", BACKDROP_INFO], ["entrance", ENTRANCE_INFO], ["emphasis", EMPHASIS_INFO], ["transition", SLIDE_TRANSITION_INFO]]) {
+    if (slide[key] != null && (!Object.hasOwn(info, slide[key]) || slide[key] === "auto")) delete slide[key];
+  }
   if (Array.isArray(slide.details)) {
     slide.details = slide.details.filter((d) => d && typeof d.target === "string" && strip(d.text)).map((d) => ({ target: d.target.slice(0, 30), ...(strip(d.title) ? { title: strip(d.title).slice(0, 60) } : {}), text: String(d.text).slice(0, 400) })).slice(0, 12);
     if (!slide.details.length) delete slide.details;
@@ -456,12 +465,13 @@ function normalizeSlide(raw, index, total) {
 
 function normalizeMotion(motion = {}) {
   return {
-    entrance: ["rise", "fade", "blur", "pop", "none"].includes(motion.entrance) ? motion.entrance : "rise",
-    hover: ["lift", "focus", "none"].includes(motion.hover) ? motion.hover : "lift",
+    entrance: motion.entrance === "none" || Object.hasOwn(E.ENTRANCES, motion.entrance ?? "") ? motion.entrance : "rise",
+    hover: motion.hover === "none" || Object.hasOwn(E.HOVERS, motion.hover ?? "") ? motion.hover : "lift",
     numbers: motion.numbers !== false,
     ambient: motion.ambient !== false,
     kinetic: motion.kinetic === "none" || E.KINETIC[motion.kinetic] ? motion.kinetic : "mask",
     backdrop: E.BACKDROPS[motion.backdrop] ? motion.backdrop : "none",
+    emphasis: Object.hasOwn(E.EMPHASES, motion.emphasis ?? "") ? motion.emphasis : "marker",
     draw: motion.draw !== false,
   };
 }
@@ -620,7 +630,7 @@ function extractUnits(slide) {
 
 function convertSlide(slide, type) {
   const next = defaultSlide(type);
-  for (const key of ["title", "takeaway", "subhead", "notes", "visualAsset", "customImage", "imagePlacement", "media", "photoMotion", "kinetic", "backdrop", "drillOf"]) {
+  for (const key of ["title", "takeaway", "subhead", "notes", "visualAsset", "customImage", "imagePlacement", "media", "photoMotion", "kinetic", "backdrop", "entrance", "emphasis", "transition", "drillOf"]) {
     if (slide[key] && (key !== "takeaway" || TITLED(type))) next[key] = clone(slide[key]);
   }
   if (type === "closing" && !next.message) next.message = slide.takeaway || slide.message || "";
@@ -1340,7 +1350,7 @@ const PLACEHOLDERS = new Set([
   "工程", "項目", "補足", "説明", "伝えたいひと言", "写真に重ねて見せる補足の一文", "ポイント", "いちばん伝えたい**ひと言**を大きく",
 ]);
 const FULLWIDTH_NUMBER = /[０-９％．，]/;
-const NON_TEXT_KEYS = new Set(["type", "visualAsset", "imagePosition", "state", "trend", "status", "chartType", "customImage", "icon", "animation", "photoMotion", "kinetic", "backdrop", "media", "imagePlacement", "target", "notes"]);
+const NON_TEXT_KEYS = new Set(["type", "visualAsset", "imagePosition", "state", "trend", "status", "chartType", "customImage", "icon", "animation", "photoMotion", "kinetic", "backdrop", "entrance", "emphasis", "transition", "media", "imagePlacement", "target", "notes"]);
 
 function textEntries(value, path = [], out = []) {
   if (typeof value === "string") out.push([path, value]);
@@ -2426,10 +2436,15 @@ function motionGraphicsSection(slide) {
     h("select", { "data-mg": key, onchange: (event) => set(key, event.target.value) }, Object.entries(info).map(([value, text]) => h("option", { value, selected: (slide[key] || "auto") === value }, text))));
   const now = `いま：文字は「${kinetic ? E.KINETIC[kinetic].replace(/（.*）/, "") : "動かさない"}」、背景は「${backdrop ? E.BACKDROPS[backdrop] : "なし"}」`;
   return h("div", { class: "section", "data-key": "motion-graphics" },
-    h("div", { class: "section-title" }, h("span", {}, "モーショングラフィック"),
+    h("div", { class: "section-title" }, h("span", {}, "モーショングラフィック・この1枚の動き"),
       h("span", { class: "btns" }, h("button", { class: "btn btn-sm", type: "button", onclick: () => previewMotion() }, "▶ 確認"))),
-    h("div", { class: "grid-2" }, select("kinetic", KINETIC_INFO, TITLED(slide.type) && !["hero", "statement"].includes(slide.type) ? "タイトルの動き" : "大きな文字の動き"), select("backdrop", BACKDROP_INFO, "背景の動き")),
-    h("div", { class: "hint", style: { "margin-top": "6px" } }, `${now}。おまかせは「デザインと動き」の設定に従います（表紙・章扉・ひと言・最後のスライド）。`));
+    h("div", { class: "grid-2 mg-grid" },
+      select("kinetic", KINETIC_INFO, TITLED(slide.type) && !["hero", "statement"].includes(slide.type) ? "タイトルの動き" : "大きな文字の動き"),
+      select("backdrop", BACKDROP_INFO, "背景の動き"),
+      select("entrance", ENTRANCE_INFO, "登場のしかた"),
+      select("emphasis", EMPHASIS_INFO, "強調（**語句**）の見せ方"),
+      select("transition", SLIDE_TRANSITION_INFO, "このスライドへの切り替え")),
+    h("div", { class: "hint", style: { "margin-top": "6px" } }, `${now}。おまかせは「デザインと動き」の設定に従います（文字・背景は表紙・章扉・ひと言・最後のスライドに効きます）。`));
 }
 
 const ITEM_NAMES = { items: "項目", steps: "工程", points: "要点", rows: "行", milestones: "時期", lanes: "レーン", levels: "段", branches: "枝", stats: "指標", flows: "流れ", message: "アクション", leftItems: "左", rightItems: "右" };
@@ -2674,8 +2689,17 @@ function syncDesignControls() {
   $("numbersCheck").checked = motion.numbers !== false;
   $("ambientCheck").checked = motion.ambient !== false;
   $("drawCheck").checked = motion.draw !== false;
-  for (const card of document.querySelectorAll("#backdropGrid .motion-card")) card.setAttribute("aria-checked", String(card.dataset.value === motion.backdrop));
-  for (const card of document.querySelectorAll("#kineticGrid .motion-card")) card.setAttribute("aria-checked", String(card.dataset.value === motion.kinetic));
+  for (const [grid, value] of [["backdropGrid", motion.backdrop], ["kineticGrid", motion.kinetic], ["emphasisGrid", motion.emphasis]]) {
+    for (const card of document.querySelectorAll(`#${grid} .motion-card`)) card.setAttribute("aria-checked", String(card.dataset.value === value));
+  }
+}
+
+/** The design dialog's selects list what the engine knows. */
+function fillMotionSelects() {
+  const fill = (id, entries) => $(id).replaceChildren(...entries.map(([value, text]) => h("option", { value }, text)));
+  fill("transitionSelect", Object.entries(E.TRANSITIONS));
+  fill("entranceSelect", [...Object.entries(E.ENTRANCES), ["none", "動かさない"]]);
+  fill("hoverSelect", [...Object.entries(E.HOVERS), ["none", "変化なし"]]);
 }
 
 // Live previews of every motion graphic, drawn on the deck's own cover (and replayed while the dialog is open).
@@ -2684,13 +2708,19 @@ function renderMotionGrids() {
   const deck = state.deck;
   const cover = deck.slides[0];
   const motion = normalizeMotion(deck.motion || DEFAULT_MOTION);
-  const card = (current, value, label, patch) => {
-    const el = E.render(cover, { ...renderOptions(), deck: { ...deck, motion: { ...motion, ...patch } }, index: 0, mode: "preview", fit: fitFor(0) ?? undefined });
+  // Emphasis is shown on a one-line statement in the deck's own design.
+  const phrase = { type: "statement", title: "強調の見せ方", text: "伝えたいことは**ひと言**で" };
+  const phraseDeck = { ...deck, slides: [cover, phrase, deck.slides.at(-1)] };
+  const card = (current, value, label, patch, sample = null) => {
+    const el = sample
+      ? E.render(sample, { ...renderOptions(), deck: { ...phraseDeck, motion: { ...motion, backdrop: "none", ...patch } }, index: 1, mode: "preview" })
+      : E.render(cover, { ...renderOptions(), deck: { ...deck, motion: { ...motion, ...patch } }, index: 0, mode: "preview", fit: fitFor(0) ?? undefined });
     return h("button", { type: "button", class: "motion-card", role: "radio", "data-value": value, "aria-checked": String(current === value), onclick: () => setDeckDesign({ motion: patch }) }, E.mount(el), h("b", {}, label));
   };
   $("backdropGrid").replaceChildren(...["none", ...Object.keys(E.BACKDROPS)].map((kind) => card(motion.backdrop, kind, kind === "none" ? "テーマの飾り" : E.BACKDROPS[kind], { backdrop: kind })));
   $("kineticGrid").replaceChildren(...["none", ...Object.keys(E.KINETIC)].map((style) => card(motion.kinetic, style, style === "none" ? "動かさない" : E.KINETIC[style].replace(/（.*）/, ""), { kinetic: style })));
-  const replay = () => { for (const slide of document.querySelectorAll("#kineticGrid .motion-card .hs-slide")) E.play(slide); };
+  $("emphasisGrid").replaceChildren(...Object.entries(E.EMPHASES).map(([style, label]) => card(motion.emphasis, style, label, { emphasis: style }, phrase)));
+  const replay = () => { for (const slide of document.querySelectorAll("#kineticGrid .motion-card .hs-slide, #emphasisGrid .motion-card .hs-slide")) E.play(slide); };
   clearInterval(motionCardsTimer);
   requestAnimationFrame(replay);
   motionCardsTimer = setInterval(() => { if ($("designDialog").open) replay(); else clearInterval(motionCardsTimer); }, 3600);
@@ -3428,7 +3458,7 @@ function createProposal(id, chat, base, baseDeck, { whole = false } = {}) {
   renderChat();
 }
 
-const TRANSITION_LABEL = { fade: "フェード", slide: "スライド", zoom: "ズーム", morph: "モーフ", wipe: "ワイプ", circle: "サークル", none: "なし" };
+const TRANSITION_LABEL = Object.fromEntries(Object.entries(E.TRANSITIONS).map(([key, label]) => [key, label.replace(/（.*）/, "")]));
 
 /** "文字：マスク → タイプライター／背景：なし → 軌道" for a deck-wide motion change. */
 function motionChangeText(before = {}, patch = {}) {
@@ -3436,6 +3466,9 @@ function motionChangeText(before = {}, patch = {}) {
   const parts = [];
   if (patch.kinetic) parts.push(`大きな文字：${KINETIC_INFO[was.kinetic]} → ${KINETIC_INFO[patch.kinetic]}`);
   if (patch.backdrop) parts.push(`背景：${BACKDROP_INFO[was.backdrop]} → ${BACKDROP_INFO[patch.backdrop]}`);
+  if (patch.entrance) parts.push(`登場：${ENTRANCE_INFO[was.entrance]} → ${ENTRANCE_INFO[patch.entrance]}`);
+  if (patch.hover) parts.push(`マウスを乗せたとき：${E.HOVERS[was.hover] ?? "変化なし"} → ${E.HOVERS[patch.hover] ?? "変化なし"}`);
+  if (patch.emphasis) parts.push(`強調：${E.EMPHASES[was.emphasis]} → ${E.EMPHASES[patch.emphasis]}`);
   if (typeof patch.draw === "boolean") parts.push(`線を描く：${patch.draw ? "オン" : "オフ"}`);
   return parts.join("／");
 }
@@ -3826,6 +3859,9 @@ function commandList() {
       ...E.THEMES.map((theme) => cmd("デザイン", "◐", `テーマ：${theme.name}`, () => setDeckDesign({ theme: theme.id }), theme.desc)),
       ...Object.entries(E.BACKDROPS).map(([kind, label]) => cmd("動き", "◎", `背景の動き：${label}`, () => { setDeckDesign({ motion: { backdrop: kind } }); toast(`表紙・章扉などの背景を「${label}」にしました`); }, "モーショングラフィック（資料全体）")),
       ...Object.entries(E.KINETIC).map(([style, label]) => cmd("動き", "◎", `文字の動き：${label.replace(/（.*）/, "")}`, () => { setDeckDesign({ motion: { kinetic: style } }); toast(`大きな文字の動きを「${label.replace(/（.*）/, "")}」にしました`); }, "モーショングラフィック（資料全体）")),
+      ...Object.entries(E.ENTRANCES).map(([style, label]) => cmd("動き", "◎", `登場のしかた：${label}`, () => { setDeckDesign({ motion: { entrance: style } }); toast(`登場のしかたを「${label}」にしました`); }, "資料全体")),
+      ...Object.entries(E.EMPHASES).map(([style, label]) => cmd("動き", "◎", `強調の見せ方：${label}`, () => { setDeckDesign({ motion: { emphasis: style } }); toast(`強調の見せ方を「${label}」にしました`); }, "**語句** の目立たせ方（資料全体）")),
+      ...Object.entries(E.TRANSITIONS).map(([kind, label]) => cmd("動き", "◎", `切り替え：${label.replace(/（.*）/, "")}`, () => { setDeckDesign({ transition: kind }); toast(`スライドの切り替えを「${label.replace(/（.*）/, "")}」にしました`); }, "資料全体")),
       cmd("スライド", "▶", "このスライドの動きを確認", () => previewMotion()),
       cmd("スライド", "＋", "スライドを追加", () => openTypeDialog("insert")),
       cmd("スライド", "⇄", "このスライドのレイアウトを変更", () => openTypeDialog("change")),
@@ -4484,6 +4520,7 @@ function bind() {
   $("ambientCheck").addEventListener("change", (event) => setDeckDesign({ motion: { ambient: event.target.checked } }));
   $("drawCheck").addEventListener("change", (event) => setDeckDesign({ motion: { draw: event.target.checked } }));
   $("designDialog").addEventListener("close", () => clearInterval(motionCardsTimer));
+  fillMotionSelects();
   $("designPreviewBtn").addEventListener("click", () => { $("designDialog").close(); setView("single"); previewMotion(); });
   $("mediaUrlApply").addEventListener("click", applyMediaUrl);
   $("mediaUrlInput").addEventListener("keydown", (event) => { if (event.key === "Enter" && !event.isComposing) { event.preventDefault(); applyMediaUrl(); } });

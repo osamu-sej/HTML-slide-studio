@@ -4,7 +4,7 @@
 
 const SKIP_KEYS = new Set(["type", "date", "sectionNo", "start", "span", "columns", "icon", "illustration", "visualAsset",
   "customImage", "image64", "animation", "status", "state", "trend", "chartType", "imagePosition", "visual", "done", "twoColumn",
-  "target", "media", "photoMotion", "imagePlacement", "kinetic", "backdrop", "drillOf"]);
+  "target", "media", "photoMotion", "imagePlacement", "kinetic", "backdrop", "entrance", "emphasis", "transition", "drillOf"]);
 const NUMBER = /\d+(?:[.,]\d+)*/g;
 
 /** "１，２００" → "1200", "3.50" → "3.5": one spelling per value, so "1,200店" in the material matches "1200". */
