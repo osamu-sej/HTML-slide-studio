@@ -100,6 +100,8 @@ test("photos and videos: slots, placement, YouTube and browser-kept files", asyn
   assert.equal(exported.querySelector(".hs-media img").getAttribute("src"), "data:image/jpeg;base64,AAAA", "exports carry their photos");
   const youtubeLive = E.render(slides[2], { deck, index: 2, mode: "present" });
   assert.match(youtubeLive.querySelector(".hs-placed iframe").getAttribute("src"), /youtube-nocookie\.com\/embed\/dQw4w9WgXcQ/);
+  // YouTube refuses to play (error 153) unless the player is told which site embeds it.
+  assert.equal(youtubeLive.querySelector(".hs-placed iframe").getAttribute("referrerpolicy"), "strict-origin-when-cross-origin");
   const youtubeEdit = E.render(slides[2], { deck, index: 2, mode: "edit" });
   assert.equal(youtubeEdit.querySelector("iframe"), null, "the editor shows a still picture, not a player");
   const video = E.render(slides[3], { deck, index: 3, mode: "present", mediaUrls: { "idb:abc": "blob:video" } });
