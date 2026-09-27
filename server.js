@@ -52,9 +52,31 @@ import {
 
 const here = dirname(fileURLToPath(import.meta.url));
 const APP_VERSION = JSON.parse(readFileSync(join(here, "package.json"), "utf8")).version;
+const APP_COMMIT = gitCommit();
+const STARTED_AT = new Date();
 const IMAGE_GENERATION_REQUEST = /(?:gpt[\s-]*image|(?:画像|イラスト|写真)[^。！？!?\n]{0,18}(?:生成|描いて|作って|作成)|(?:生成|作成)[^。！？!?\n]{0,10}(?:画像|イラスト))/i;
 const REFERENCE_ASSETS = { executiveDecision: "executive-decision.jpg", storeOperations: "store-operations.jpg", customerExperience: "customer-experience.jpg", dataInsight: "data-insight.jpg", transformationRoadmap: "transformation-roadmap.jpg", businessWorkshop: "business-workshop.jpg", businessEtiquette: "business-etiquette.jpg", promptDesign: "prompt-design.jpg", aiWorkflow: "ai-workflow-visual.jpg", ai: "ai-executive-hero.jpg" };
 const asksForImageGeneration = (message) => IMAGE_GENERATION_REQUEST.test(message);
+/**
+ * Which commit this server runs, so people can tell an updated app from a stale one:
+ * Render passes it in the environment; a local checkout has it in .git (read without the git command).
+ */
+function gitCommit() {
+  const fromEnv = process.env.RENDER_GIT_COMMIT || process.env.GIT_COMMIT || "";
+  if (/^[0-9a-f]{7,40}$/i.test(fromEnv)) return fromEnv.slice(0, 7);
+  try {
+    const git = join(here, ".git");
+    const head = readFileSync(join(git, "HEAD"), "utf8").trim();
+    if (!head.startsWith("ref: ")) return head.slice(0, 7);
+    const ref = head.slice(5);
+    const loose = join(git, ref);
+    const sha = existsSync(loose) ? readFileSync(loose, "utf8") : readFileSync(join(git, "packed-refs"), "utf8").split("\n").find((line) => line.endsWith(` ${ref}`)) ?? "";
+    return /^[0-9a-f]{40}/.test(sha.trim()) ? sha.trim().slice(0, 7) : "";
+  } catch {
+    return "";
+  }
+}
+
 function revisionEffort(instruction, focus = []) {
   return focus.length > 1 || /全体|構成|骨子|流れ|前後|写真|画像|図解|デザイン|説得|意思決定|根拠|動き/.test(instruction) ? "medium" : "low";
 }
@@ -88,7 +110,9 @@ const icons = readFileSync(join(PUBLIC, "engine", "icons.json"), "utf8").trim();
 function loadStatic() {
   const files = new Map();
   const add = (path, body, type) => files.set(path, { body: Buffer.isBuffer(body) ? body : Buffer.from(body), type, etag: `"${createHash("sha1").update(body).digest("base64url").slice(0, 16)}"` });
-  const inject = (text) => text.replaceAll("__APP_VERSION__", APP_VERSION);
+  const started = STARTED_AT.toLocaleString("ja-JP", { timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+  const build = `バージョン ${APP_VERSION}${APP_COMMIT ? `（コミット ${APP_COMMIT}）` : ""}・サーバー起動 ${started}`;
+  const inject = (text) => text.replaceAll("__APP_VERSION__", APP_VERSION).replaceAll("__APP_BUILD__", build);
   add("/", inject(readFileSync(join(PUBLIC, "index.html"), "utf8")), TYPES[".html"]);
   add("/app.js", inject(readFileSync(join(PUBLIC, "app.js"), "utf8")), TYPES[".js"]);
   add("/saved-library.js", readFileSync(join(PUBLIC, "saved-library.js"), "utf8"), TYPES[".js"]);
@@ -595,7 +619,7 @@ const httpServer = createServer(async (req, res) => {
   }
 
   if ((url.pathname === "/healthz" || url.pathname === "/readyz") && req.method === "GET") {
-    return json(res, 200, { name: "HTML Slide Studio", version: APP_VERSION, status: "ok", mode: "standalone-codex-app-server" });
+    return json(res, 200, { name: "HTML Slide Studio", version: APP_VERSION, commit: APP_COMMIT || null, startedAt: STARTED_AT.toISOString(), status: "ok", mode: "standalone-codex-app-server" });
   }
 
   const stateless = STATELESS_API.has(url.pathname);

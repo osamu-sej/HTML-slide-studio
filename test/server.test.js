@@ -105,6 +105,8 @@ test("app shell, engine, assets and security headers", async () => {
     assert.equal(health.name, "HTML Slide Studio");
     const pkg = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
     assert.equal(health.version, pkg.version);
+    assert.match(health.commit ?? "", /^([0-9a-f]{7})?$/, "the running commit, when the checkout has one");
+    assert.ok(!Number.isNaN(Date.parse(health.startedAt)));
 
     const page = await server.request("/");
     assert.equal(page.headers.get("referrer-policy"), "same-origin");
@@ -116,7 +118,8 @@ test("app shell, engine, assets and security headers", async () => {
     for (const id of ["briefInput", "askChatGptBtn", "createThemes", "filmstrip", "inspector", "chatPane", "designDialog", "themeGrid", "mediaUrlDialog", "presenter", "measureRoot", "downloadBtn", "historyDialog"]) {
       assert.match(html, new RegExp(`id="${id}"`), `missing #${id}`);
     }
-    assert.doesNotMatch(html, /__APP_VERSION__/);
+    assert.doesNotMatch(html, /__APP_VERSION__|__APP_BUILD__/);
+    assert.match(html, new RegExp(`<small title="バージョン ${pkg.version.replace(/\./g, "\\.")}[^"]*サーバー起動 [^"]+">v${pkg.version.replace(/\./g, "\\.")}</small>`), "the header shows the version and, on hover, the running build");
     assert.equal((await server.postJson("/api/client-error", { message: "test", where: "unit" })).status, 204);
 
     const engine = await (await server.request("/engine/engine.js")).text();
