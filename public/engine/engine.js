@@ -70,6 +70,28 @@
     return "fade";
   }
 
+  // Motion graphics: the big lines set themselves in motion (kinetic type), a graphic moves behind the slide
+  // (backdrop), and icons, connectors and markers draw themselves. Stage slides (STILL) get them by default.
+  const KINETIC = { mask: "マスクから立ち上がる", words: "ことばごとに浮かぶ", chars: "1文字ずつ弾む", type: "タイプライター", scramble: "デコード（文字が入れ替わって決まる）" };
+  const BACKDROPS = { particles: "粒子が昇る", waves: "波が流れる", grid: "グリッドと走査線", orbits: "軌道を回る", gradient: "色がゆらぐ", lines: "線を光が流れる", shapes: "図形が漂う" };
+
+  /** The kinetic style a slide's big text plays with, or null. */
+  function kineticOf(slide, type, motion = {}) {
+    const own = slide?.kinetic;
+    if (own === "none") return null;
+    if (KINETIC[own]) return own;
+    if (!STILL.has(type) || motion.kinetic === "none") return null;
+    return KINETIC[motion.kinetic] ? motion.kinetic : "mask";
+  }
+
+  /** The moving graphic behind a slide, or null. The deck's choice covers the cover, chapters, statements and the close. */
+  function backdropOf(slide, type, motion = {}) {
+    const own = slide?.backdrop;
+    if (own === "none") return null;
+    if (BACKDROPS[own]) return own;
+    return BACKDROPS[motion.backdrop] && STILL.has(type) && type !== "hero" ? motion.backdrop : null;
+  }
+
   // ---------------------------------------------------------------- DOM helpers
 
   function h(tag, attrs, ...children) {
@@ -148,6 +170,8 @@
     if (!entry) return null;
     const el = s("svg", { class: ["hs-icon", cls].filter(Boolean).join(" "), viewBox: "0 0 24 24", "aria-hidden": "true" });
     el.innerHTML = entry.svg;
+    // Every stroke measures 1 so the icon can draw itself line by line (see "draw" in engine.css).
+    for (const shape of el.children) shape.setAttribute("pathLength", "1");
     return el;
   }
 
@@ -190,8 +214,12 @@
     const motion = ["zoom", "pan", "float", "parallax"].includes(slide.photoMotion) ? slide.photoMotion : "none";
     if (media?.src) {
       const yt = youtubeId(media.src);
-      const kind = yt ? "youtube" : media.kind === "video" || /^data:video\//.test(media.src) || /\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(media.src) ? "video" : "image";
-      return { kind, src: media.src, yt, motion: kind === "youtube" ? "none" : motion, fit: media.fit === "contain" ? "contain" : "cover", autoplay: media.autoplay !== false, loop: media.loop !== false, muted: media.muted !== false, placement: media.placement || null, name: media.name || "" };
+      const kind = yt ? "youtube"
+        : media.kind === "lottie" || /^data:application\/json/.test(media.src) || /\.json(\?|#|$)/i.test(media.src) ? "lottie"
+          : media.kind === "video" || /^data:video\//.test(media.src) || /\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(media.src) ? "video" : "image";
+      // Lottie animations usually sit on a transparent square: show all of it unless asked to fill.
+      const fit = media.fit === "contain" || (kind === "lottie" && media.fit !== "cover") ? "contain" : "cover";
+      return { kind, src: media.src, yt, motion: kind === "youtube" || kind === "lottie" ? "none" : motion, fit, autoplay: media.autoplay !== false, loop: media.loop !== false, muted: media.muted !== false, placement: media.placement || null, name: media.name || "" };
     }
     if (typeof slide.customImage === "string" && slide.customImage.startsWith("data:image/")) return { kind: "image", src: slide.customImage, motion, fit: "cover", placement: slide.imagePlacement || null };
     if (slide.visualAsset && PHOTOS[slide.visualAsset]) return { kind: "image", src: `asset:${slide.visualAsset}`, motion, fit: "cover", placement: null };
@@ -224,6 +252,16 @@
         box.append(h("iframe", { src: `https://www.youtube-nocookie.com/embed/${desc.yt}?${params}`, title: desc.name || "動画", allow: "autoplay; encrypted-media; picture-in-picture; fullscreen", allowfullscreen: true, loading: "lazy", "data-autoplay": desc.autoplay ? "" : null }));
       } else {
         box.append(h("img", { src: `https://i.ytimg.com/vi/${desc.yt}/hqdefault.jpg`, alt: "", draggable: "false" }), h("span", { class: "hs-play-badge" }, icon("play")));
+      }
+      return box;
+    }
+    if (desc.kind === "lottie") {
+      // Played by motion.js (mountLottie); thumbnails show a badge instead of loading the animation.
+      box.classList.add("hs-lottie");
+      if (url && ctx.mode !== "thumb") {
+        box.append(h("div", { class: "hs-lottie-host", "data-src": url, "data-fit": desc.fit, "data-loop": desc.loop ? "" : null, "data-autoplay": desc.autoplay ? "" : null }));
+      } else {
+        box.append(h("span", { class: "hs-lottie-badge" }, icon("sparkles"), h("span", {}, desc.name ? strip(desc.name).replace(/\.json$/i, "").slice(0, 24) : "アニメーション")));
       }
       return box;
     }
@@ -620,7 +658,7 @@
         const p = (deg, rad = r) => [c + rad * Math.cos((deg * Math.PI) / 180), c + rad * Math.sin((deg * Math.PI) / 180)];
         const [x0, y0] = p(a0);
         const [x1, y1] = p(a1);
-        const seg = s("path", { class: "hs-seg", d: `M${x0},${y0} A${r},${r} 0 ${a1 - a0 > 180 ? 1 : 0} 1 ${x1},${y1}`, fill: "none", stroke: `color-mix(in srgb, var(--accent) ${Math.round(100 - (i * 55) / n)}%, var(--surface2))`, "stroke-width": 84, "data-item": `items[${i}]` });
+        const seg = s("path", { class: "hs-seg", d: `M${x0},${y0} A${r},${r} 0 ${a1 - a0 > 180 ? 1 : 0} 1 ${x1},${y1}`, fill: "none", stroke: `color-mix(in srgb, var(--accent) ${Math.round(100 - (i * 55) / n)}%, var(--surface2))`, "stroke-width": 84, pathLength: 1, "data-item": `items[${i}]` });
         seg.classList.add("hs-item");
         svg.append(seg);
         const [ax, ay] = p(a1 + gap / 2);
@@ -731,7 +769,7 @@
     triangle(slide) {
       const items = arr(slide.items).slice(0, 3);
       const spots = [[50, 8], [17, 64], [83, 64]];
-      const svg = s("svg", { viewBox: "0 0 100 100", preserveAspectRatio: "none" },
+      const svg = s("svg", { class: "hs-wipe", viewBox: "0 0 100 100", preserveAspectRatio: "none" },
         s("polygon", { points: "50,8 17,64 83,64", fill: "color-mix(in srgb, var(--accent) 7%, transparent)", stroke: "var(--line2)", "stroke-width": 3, "vector-effect": "non-scaling-stroke", "stroke-dasharray": "10 10" }));
       return body("", h("div", { class: "hs-tri" }, svg, items.map((it, i) => item(`items[${i}]`, { class: "hs-tri-node", style: { left: `${spots[i][0]}%`, top: `${spots[i][1]}%` } },
         h("span", { class: "hs-bubble" }, icon(it.icon) || h("span", { class: "hs-index" }, pad2(i + 1))),
@@ -909,7 +947,7 @@
     logicTree(slide) {
       const branches = arr(slide.branches);
       const n = Math.max(1, branches.length);
-      const svg = s("svg", { viewBox: "0 0 1000 1000", preserveAspectRatio: "none" });
+      const svg = s("svg", { class: "hs-wipe", viewBox: "0 0 1000 1000", preserveAspectRatio: "none" });
       const line = (x1, y1, x2, y2, hot) => s("polyline", { points: `${x1},${y1} ${x2},${y1} ${x2},${y2}`, fill: "none", stroke: hot ? "var(--accent)" : "var(--line2)", "stroke-width": hot ? 4 : 3, "vector-effect": "non-scaling-stroke" });
       const nodes = [h("div", { class: "hs-tree-node", style: { left: "0", top: "50%", width: "24%", transform: "translateY(-50%)" }, "data-step": "" }, t("div", "hs-tree-root", slide.root, "root"))];
       branches.forEach((branch, i) => {
@@ -1029,12 +1067,112 @@
     return h("div", { class: "hs-cover-art" }, svg);
   }
 
+  // ---------------------------------------------------------------- backdrops (moving graphics behind a slide)
+
+  /** A small deterministic random source, so a slide's backdrop looks the same in every copy of it. */
+  function seeded(seed) {
+    let a = (seed >>> 0) || 1;
+    return () => {
+      a = (a + 0x6d2b79f5) >>> 0;
+      let x = a;
+      x = Math.imul(x ^ (x >>> 15), x | 1);
+      x ^= x + Math.imul(x ^ (x >>> 7), x | 61);
+      return ((x ^ (x >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  const SHAPES = {
+    ring: () => s("circle", { cx: 50, cy: 50, r: 34 }),
+    tri: () => s("polygon", { points: "50,14 86,80 14,80" }),
+    square: () => s("rect", { x: 20, y: 20, width: 60, height: 60, rx: 10 }),
+    plus: () => s("path", { d: "M50 16V84M16 50H84" }),
+    zig: () => s("polyline", { points: "8,62 29,38 50,62 71,38 92,62" }),
+    dots: () => s("g", { class: "fill" }, [20, 50, 80].flatMap((x) => [20, 50, 80].map((y) => s("circle", { cx: x, cy: y, r: 7 })))),
+  };
+
+  /** Every piece is placed and timed here; engine.css moves it (and keeps it still in thumbnails and prints). */
+  function backdrop(kind, seed) {
+    const rnd = seeded(seed);
+    const r = (min, max) => min + (max - min) * rnd();
+    const px = (n) => `${Math.round(n)}px`;
+    const sec = (n) => `${n.toFixed(1)}s`;
+    const box = h("div", { class: "hs-bd", "data-bd": kind, "aria-hidden": "true" });
+    if (kind === "particles") {
+      for (let i = 0; i < 38; i += 1) {
+        const soft = rnd() < 0.2;
+        const size = soft ? r(28, 70) : r(6, 17);
+        box.append(h("i", { class: [soft ? "soft" : "", ["", "", "c2", "c3"][i % 4]], style: {
+          left: `${r(-2, 99).toFixed(1)}%`, top: `${r(6, 102).toFixed(1)}%`, width: px(size), height: px(size),
+          "--o": (soft ? r(0.1, 0.2) : r(0.22, 0.5)).toFixed(2), "--t": sec(r(11, 24)), "--dl": sec(-r(0, 24)), "--dx": px(r(-90, 90)), "--dy": px(-r(180, 360)),
+        } }));
+      }
+    } else if (kind === "waves") {
+      // Periods divide 1920, so sliding a 3840px strip by 1920px loops without a seam.
+      const layers = [["a", 960, 62, 190, 0.13, 26], ["b", 640, 44, 250, 0.09, 19], ["c", 1920, 96, 150, 0.07, 36]];
+      let crest = "";
+      for (const [cls, period, amp, base, opacity, secs] of layers) {
+        const pts = [];
+        for (let x = 0; x <= 3840; x += 24) pts.push(`${x},${(base + amp * Math.sin((2 * Math.PI * x) / period)).toFixed(1)}`);
+        if (cls === "a") crest = pts.join(" L");
+        box.append(h("div", { class: `hs-bd-wave ${cls}`, style: { "--o": opacity, "--t": `${secs}s` } },
+          s("svg", { viewBox: "0 0 3840 400", preserveAspectRatio: "none" }, s("path", { d: `M0,400 L${pts.join(" L")} L3840,400 Z` }))));
+      }
+      box.append(h("div", { class: "hs-bd-wave line", style: { "--t": "26s" } }, s("svg", { viewBox: "0 0 3840 400", preserveAspectRatio: "none" }, s("path", { d: `M${crest}` }))));
+    } else if (kind === "grid") {
+      box.append(h("div", { class: "hs-bd-lines" }), h("b", { class: "hs-bd-scan" }));
+      for (let i = 0; i < 10; i += 1) {
+        box.append(h("i", { class: ["hs-bd-node", i % 3 === 2 ? "c2" : ""], style: { left: px(96 * Math.round(r(8, 19))), top: px(96 * Math.round(r(1, 10))), "--dl": sec(-r(0, 6)) } }));
+      }
+    } else if (kind === "orbits") {
+      const orbit = h("div", { class: "hs-bd-orbit" });
+      const rings = [[300, 116, 17], [470, 186, 27], [660, 262, 41]];
+      orbit.append(s("svg", { viewBox: "-720 -320 1440 640", width: 1440, height: 640 },
+        rings.map(([rx, ry]) => s("ellipse", { cx: 0, cy: 0, rx, ry })),
+        s("circle", { class: "core", cx: 0, cy: 0, r: 46 })));
+      rings.forEach(([rx, ry, secs], i) => {
+        for (let k = 0; k < (i === 1 ? 2 : 1); k += 1) {
+          orbit.append(h("i", { class: ["hs-bd-sat", i === 2 ? "c2" : ""], style: {
+            "offset-path": `path("M ${-rx} 0 A ${rx} ${ry} 0 1 0 ${rx} 0 A ${rx} ${ry} 0 1 0 ${-rx} 0 Z")`,
+            "--p": `${Math.round(r(0, 100))}%`, "--t": `${secs}s`,
+          } }));
+        }
+      });
+      box.append(orbit);
+    } else if (kind === "gradient") {
+      // Colour gathers top right and along the bottom, away from the headline on the left.
+      for (const [cls, x, y, size] of [["a", 58, -30, 1000], ["b", 66, 50, 860], ["c", 22, 78, 760], ["d", -16, -34, 560]]) {
+        box.append(h("i", { class: `hs-bd-blob ${cls}`, style: { left: `${x}%`, top: `${y}%`, width: px(size), height: px(size) } }));
+      }
+    } else if (kind === "lines") {
+      const svg = s("svg", { viewBox: "0 0 1920 1080", preserveAspectRatio: "none" });
+      for (let i = 0; i < 8; i += 1) {
+        const y0 = r(460, 1080);
+        const y1 = r(140, 880);
+        const d = `M-60,${y0.toFixed(0)} C${r(320, 720).toFixed(0)},${(y0 - r(-160, 280)).toFixed(0)} ${r(1080, 1500).toFixed(0)},${(y1 + r(-220, 220)).toFixed(0)} 1980,${y1.toFixed(0)}`;
+        const cls = i % 3 === 0 ? "c2" : "";
+        svg.append(s("path", { class: `base ${cls}`, d }),
+          s("path", { class: `flow ${cls}`, d, pathLength: 1000, style: { "--s": Math.round(r(0, 1000)), "--t": sec(r(5, 10)), "--dl": sec(-r(0, 10)) } }));
+      }
+      box.append(svg);
+    } else if (kind === "shapes") {
+      ["ring", "tri", "square", "plus", "dots", "zig", "ring", "tri", "plus", "square", "zig", "ring"].forEach((shape, i) => {
+        // Keep the reading area (left and middle) clear; shapes gather at the right and along the top and bottom.
+        let x = 0;
+        let y = 0;
+        do { x = r(1, 95); y = r(3, 92); } while (x < 64 && y > 12 && y < 86);
+        box.append(h("i", { class: ["hs-bd-shape", ["", "c2", "c3"][i % 3]], style: { left: `${x.toFixed(1)}%`, top: `${y.toFixed(1)}%`, "--sz": px(r(48, 96)), "--rot": `${Math.round(r(0, 360))}deg`, "--t": sec(r(6, 11)), "--dl": sec(-r(0, 11)) } },
+          s("svg", { viewBox: "0 0 100 100" }, SHAPES[shape]())));
+      });
+    }
+    return box;
+  }
+
   function renderTitle(slide, ctx, parts) {
     const media = ctx.media && !ctx.media.placement ? ctx.media : null;
     const kicker = strip(ctx.deck?.purpose || "");
     const meta = [ctx.deck?.audience ? `対象：${strip(ctx.deck.audience)}` : "", strip(slide.date || "")].filter(Boolean);
     if (media) parts.root.append(h("div", { class: "hs-cover-photo" }, mediaEl(media, ctx)));
-    else parts.decor.append(coverArt(ctx.theme, ctx.dark));
+    else if (!ctx.backdrop) parts.decor.append(coverArt(ctx.theme, ctx.dark));
     parts.frame.append(h("div", { class: ["hs-cover", media ? "with-photo" : ""] },
       kicker ? h("div", { class: "hs-cover-kicker hs-enter", style: { "--d": 0 } }, kicker) : null,
       h("h1", { class: "hs-t hs-cover-title hs-enter", style: { "--d": 1 }, "data-field": "title" }, rich(slide.title)),
@@ -1057,7 +1195,7 @@
     const actions = message.split(/\n|／|(?<=。)(?=.)/).map((part) => part.trim()).filter(Boolean);
     const many = actions.length >= 2 && actions.length <= 3 && !media;
     if (media) parts.root.append(mediaEl(media, ctx, "hs-closing-photo"));
-    else parts.decor.append(coverArt(ctx.theme, ctx.dark));
+    else if (!ctx.backdrop) parts.decor.append(coverArt(ctx.theme, ctx.dark));
     const box = h("div", { class: ["hs-closing", media ? "with-photo" : ""] },
       h("div", { class: "hs-closing-title hs-enter", style: { "--d": 0 } }, t("span", "", slide.title || "次のアクション", "title")));
     if (many) {
@@ -1114,10 +1252,13 @@
     const live = mode === "present";
     const type = LAYOUTS[slide?.type] || FULL[slide?.type] ? slide.type : "content";
     const motion = deck.motion || {};
+    const backdropKind = slide ? backdropOf(slide, type, motion) : null;
+    const kinetic = slide ? kineticOf(slide, type, motion) : null;
     const ctx = {
       deck, index, total, theme, dark: meta.dark, mode, live,
       assetBase: opts.assetBase, assetMap: opts.assetMap, mediaUrls: opts.mediaUrls,
       media: slide ? mediaOf(slide, opts) : null,
+      backdrop: backdropKind,
       eyebrow: "", sectionNo: 1,
     };
     // The nearest chapter above this slide names where the audience is in the story.
@@ -1131,11 +1272,13 @@
 
     const build = BUILDS.includes(slide?.animation) && slide.animation !== "auto" ? slide.animation : recommendedBuild(type);
     const root = h("div", {
-      class: ["hs-slide", mode === "thumb" || mode === "print" ? "hs-static" : "", mode === "edit" ? "hs-editable" : "", mode === "print" ? "hs-print" : "", live ? "hs-live" : "", motion.numbers !== false ? "hs-numbers" : ""],
-      "data-theme": theme, "data-type": type, "data-build": build,
+      class: ["hs-slide", mode === "thumb" || mode === "print" ? "hs-static" : "", mode === "edit" ? "hs-editable" : "", mode === "print" ? "hs-print" : "", live ? "hs-live" : "", motion.numbers !== false ? "hs-numbers" : "", STILL.has(type) ? "hs-stage" : ""],
+      "data-theme": theme, "data-type": type, "data-build": build, "data-tone": meta.dark ? "dark" : "light",
       "data-entrance": ["fade", "blur", "pop", "none"].includes(motion.entrance) ? motion.entrance : "rise",
       "data-hover": ["lift", "focus", "none"].includes(motion.hover) ? motion.hover : "lift",
       "data-ambient": motion.ambient === false ? "off" : "on",
+      "data-draw": motion.draw === false ? "off" : "on",
+      "data-kinetic": kinetic, "data-backdrop": backdropKind,
       role: "img", "aria-label": `${index + 1}枚目：${strip(slide?.title || TYPE_LABELS[type] || "")}`,
     });
     if (deck.accent && /^#[0-9a-f]{6}$/i.test(deck.accent)) {
@@ -1150,6 +1293,7 @@
 
     const decor = h("div", { class: "hs-decor", "aria-hidden": "true" });
     if (theme === "aurora") decor.append(h("i"), h("i"), h("i"));
+    if (backdropKind) decor.append(backdrop(backdropKind, (index + 1) * 7919 + Object.keys(BACKDROPS).indexOf(backdropKind) * 104729));
     const frame = h("div", { class: "hs-frame" });
     const overlay = h("div", { class: "hs-overlay" });
     root.append(decor);
@@ -1224,7 +1368,7 @@
 
   function plusIcon() {
     const el = s("svg", { class: "hs-icon", viewBox: "0 0 24 24" });
-    el.innerHTML = '<path d="M12 5v14"/><path d="M5 12h14"/>';
+    el.innerHTML = '<path d="M12 5v14" pathLength="1"/><path d="M5 12h14" pathLength="1"/>';
     return el;
   }
 
@@ -1350,10 +1494,10 @@
 
   const Engine = root.SlideEngine || {};
   Object.assign(Engine, {
-    W, H, THEMES, PHOTOS, TYPE_LABELS, BUILDS, LAYOUT_TYPES: [...Object.keys(FULL), "hero", ...Object.keys(LAYOUTS)].filter((v, i, a) => a.indexOf(v) === i),
+    W, H, THEMES, PHOTOS, TYPE_LABELS, BUILDS, KINETIC, BACKDROPS, LAYOUT_TYPES: [...Object.keys(FULL), "hero", ...Object.keys(LAYOUTS)].filter((v, i, a) => a.indexOf(v) === i),
     get icons() { return ICONS; },
     setIcons(map) { ICONS = map || {}; },
-    render, mount, fit, scale, fontHref, recommendedBuild, repaintCharts, mediaOf, youtubeId, numParts, splitLabel, strip, rich, icon, h, s, cssEscape,
+    render, mount, fit, scale, fontHref, recommendedBuild, kineticOf, backdropOf, repaintCharts, mediaOf, youtubeId, numParts, splitLabel, strip, rich, icon, h, s, cssEscape,
   });
   root.SlideEngine = Engine;
 })(typeof window !== "undefined" ? window : globalThis);

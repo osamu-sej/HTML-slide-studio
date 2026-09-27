@@ -5,6 +5,7 @@
  */
 const $ = (id) => document.getElementById(id);
 const E = window.SlideEngine;
+E.lottieUrl = "/vendor/lottie.js";
 const APP_VERSION = "__APP_VERSION__";
 const STORAGE = {
   current: "hs-studio-current-v1",
@@ -36,7 +37,11 @@ const themeMeta = (id) => E.THEMES.find((theme) => theme.id === id) ?? E.THEMES[
 const SLOTTED = new Set(["title", "section", "closing", "hero", "statement", "content", "quote", "imageText"]);
 const ICON_TYPES = new Set(["cards", "headerCards", "bulletCards", "triangle", "orgChart", "grid2x2", "headerTwoColumn", "headerThreeSummary"]);
 const DEFAULT_PLACEMENT = { x: 0.6, y: 0.3, w: 0.32, h: 0.46 };
-const DEFAULT_MOTION = { entrance: "rise", hover: "lift", numbers: true, ambient: true };
+const DEFAULT_MOTION = { entrance: "rise", hover: "lift", numbers: true, ambient: true, kinetic: "mask", backdrop: "none", draw: true };
+const TRANSITIONS = ["none", "fade", "slide", "zoom", "morph", "wipe", "circle"];
+// Motion graphics: the big lines' motion (kinetic) and the moving graphic behind a slide (backdrop).
+const KINETIC_INFO = { auto: "おまかせ（資料の設定）", none: "動かさない", ...E.KINETIC };
+const BACKDROP_INFO = { auto: "おまかせ（資料の設定）", none: "なし", ...E.BACKDROPS };
 const BUILD_INFO = {
   auto: ["おまかせ", "レイアウトに合わせて自動で選びます"],
   none: ["なし", "最初からすべて表示します"],
@@ -374,9 +379,9 @@ const EMPHASIS_KEYS = new Set(["title", "takeaway", "conclusion", "text", "messa
 function normalizeMedia(media) {
   if (!media || typeof media !== "object" || typeof media.src !== "string" || !media.src.trim()) return undefined;
   const out = { src: media.src.trim() };
-  if (["image", "video"].includes(media.kind)) out.kind = media.kind;
+  if (["image", "video", "lottie"].includes(media.kind)) out.kind = media.kind;
   if (media.name) out.name = String(media.name).slice(0, 200);
-  if (media.fit === "contain") out.fit = "contain";
+  if (media.fit === "contain" || (media.kind === "lottie" && media.fit === "cover")) out.fit = media.fit;
   for (const key of ["autoplay", "loop", "muted"]) if (typeof media[key] === "boolean") out[key] = media[key];
   const p = media.placement;
   if (p && [p.x, p.y, p.w, p.h].every((v) => Number.isFinite(v))) out.placement = clampPlacement(p);
@@ -416,6 +421,8 @@ function normalizeSlide(raw, index, total) {
   if (slide.animation && !E.BUILDS.includes(slide.animation)) delete slide.animation;
   if (slide.animation === "auto") delete slide.animation;
   if (slide.photoMotion && !PHOTO_MOTIONS.some(([value]) => value === slide.photoMotion)) delete slide.photoMotion;
+  if (slide.kinetic != null && (!KINETIC_INFO[slide.kinetic] || slide.kinetic === "auto")) delete slide.kinetic;
+  if (slide.backdrop != null && (!BACKDROP_INFO[slide.backdrop] || slide.backdrop === "auto")) delete slide.backdrop;
   if (Array.isArray(slide.details)) {
     slide.details = slide.details.filter((d) => d && typeof d.target === "string" && strip(d.text)).map((d) => ({ target: d.target.slice(0, 30), ...(strip(d.title) ? { title: strip(d.title).slice(0, 60) } : {}), text: String(d.text).slice(0, 400) })).slice(0, 12);
     if (!slide.details.length) delete slide.details;
@@ -430,6 +437,9 @@ function normalizeMotion(motion = {}) {
     hover: ["lift", "focus", "none"].includes(motion.hover) ? motion.hover : "lift",
     numbers: motion.numbers !== false,
     ambient: motion.ambient !== false,
+    kinetic: motion.kinetic === "none" || E.KINETIC[motion.kinetic] ? motion.kinetic : "mask",
+    backdrop: E.BACKDROPS[motion.backdrop] ? motion.backdrop : "none",
+    draw: motion.draw !== false,
   };
 }
 
@@ -447,7 +457,7 @@ function normalizeDeck(value, base = null) {
   const normalized = slides.map((slide, index) => normalizeSlide(slide, index, slides.length));
   const theme = THEME_IDS.has(meta.theme) ? meta.theme : THEME_IDS.has(base?.theme) ? base.theme : state.createTheme;
   const accent = /^#[0-9a-f]{6}$/i.test(meta.accent ?? "") ? meta.accent : meta.theme ? undefined : /^#[0-9a-f]{6}$/i.test(base?.accent ?? "") ? base.accent : undefined;
-  const transition = ["none", "fade", "slide", "zoom", "morph"].includes(meta.transition) ? meta.transition : base?.transition ?? "fade";
+  const transition = TRANSITIONS.includes(meta.transition) ? meta.transition : base?.transition ?? "fade";
   return {
     title: strip(meta.title || meta.deckTitle || normalized[0]?.title || "無題の資料").slice(0, 100),
     purpose: strip(meta.purpose ?? $("purposeInput").value ?? "").slice(0, 180),
@@ -587,7 +597,7 @@ function extractUnits(slide) {
 
 function convertSlide(slide, type) {
   const next = defaultSlide(type);
-  for (const key of ["title", "takeaway", "subhead", "notes", "visualAsset", "customImage", "imagePlacement", "media", "photoMotion"]) {
+  for (const key of ["title", "takeaway", "subhead", "notes", "visualAsset", "customImage", "imagePlacement", "media", "photoMotion", "kinetic", "backdrop"]) {
     if (slide[key] && (key !== "takeaway" || TITLED(type))) next[key] = clone(slide[key]);
   }
   if (type === "closing" && !next.message) next.message = slide.takeaway || slide.message || "";
@@ -1140,7 +1150,7 @@ const PLACEHOLDERS = new Set([
   "工程", "項目", "補足", "説明", "伝えたいひと言", "写真に重ねて見せる補足の一文", "ポイント", "いちばん伝えたい**ひと言**を大きく",
 ]);
 const FULLWIDTH_NUMBER = /[０-９％．，]/;
-const NON_TEXT_KEYS = new Set(["type", "visualAsset", "imagePosition", "state", "trend", "status", "chartType", "customImage", "icon", "animation", "photoMotion", "media", "imagePlacement", "target", "notes"]);
+const NON_TEXT_KEYS = new Set(["type", "visualAsset", "imagePosition", "state", "trend", "status", "chartType", "customImage", "icon", "animation", "photoMotion", "kinetic", "backdrop", "media", "imagePlacement", "target", "notes"]);
 
 function textEntries(value, path = [], out = []) {
   if (typeof value === "string") out.push([path, value]);
@@ -1278,6 +1288,8 @@ function renderFilmstrip() {
     const movable = index > 0 && index < last;
     const flags = [];
     if (slide.media?.kind === "video" || E.youtubeId(slide.media?.src)) flags.push(h("span", { title: "動画あり" }, "▶"));
+    if (slide.media?.kind === "lottie") flags.push(h("span", { title: "アニメーション（Lottie）あり" }, "✦"));
+    if (E.backdropOf(slide, slide.type, state.deck.motion) || (slide.kinetic && slide.kinetic !== "none")) flags.push(h("span", { title: "モーショングラフィックあり" }, "◎"));
     if (slide.details?.length) flags.push(h("span", { title: "クリックで開く詳細あり" }, "＋"));
     const build = slide.animation || E.recommendedBuild(slide.type);
     if (build === "click") flags.push(h("span", { title: "クリックで順番に表示" }, "⋯"));
@@ -1303,6 +1315,7 @@ function renderStage() {
   const body = $("stageBody");
   if (state.inline && body.contains(state.inline.el)) { state.stageDirty = true; return; }
   if (state.motionPreview) return;
+  E.stopLottie(body);
   if (!state.deck) {
     body.replaceChildren(h("div", { class: "empty-stage" }, h("div", {}, h("strong", {}, "まだ資料がありません"), "「作成」から構成を作るか、雛形・サンプル・JSONから始めてください。")));
     return;
@@ -1310,8 +1323,9 @@ function renderStage() {
   const deck = state.deck;
   const types = new Set(deck.slides.map((slide) => slide.type)).size;
   const videos = deck.slides.filter((slide) => slide.media?.kind === "video" || E.youtubeId(slide.media?.src)).length;
+  const lotties = deck.slides.filter((slide) => slide.media?.kind === "lottie").length;
   const details = deck.slides.reduce((sum, slide) => sum + (slide.details?.length ?? 0), 0);
-  $("deckMeta").textContent = [deck.audience && `対象：${deck.audience}`, `${deck.slides.length}枚`, `${types}種類のレイアウト`, videos ? `動画${videos}本` : "", details ? `詳細${details}か所` : ""].filter(Boolean).join(" ・ ");
+  $("deckMeta").textContent = [deck.audience && `対象：${deck.audience}`, `${deck.slides.length}枚`, `${types}種類のレイアウト`, videos ? `動画${videos}本` : "", lotties ? `アニメーション${lotties}個` : "", details ? `詳細${details}か所` : ""].filter(Boolean).join(" ・ ");
   if (state.view === "outline") return renderOutline(body);
   if (state.view === "grid") {
     body.replaceChildren(h("div", { class: "stage-grid" }, deck.slides.map((slide, index) => h("div", {
@@ -1341,6 +1355,8 @@ function renderStage() {
     fitState.byKey.set(slideKey(index), { fs: result.fs, ts: result.ts, issues: result.issues.map((issue) => ({ ...issue, slide: index })) });
   }
   wirePlacedMedia(el, slide);
+  // The editor stays still: a Lottie animation shows one frame from its middle.
+  E.mountLottie(el, { play: false, frame: 0.5 });
 }
 
 // Second text line shown in the outline for each kind of slide.
@@ -1573,7 +1589,7 @@ async function onStageDrop(event) {
     if (message) applyGeneratedImage(message, placement);
     return;
   }
-  if (/^(image|video)\//.test(file.type)) addMediaFile(file, { placement });
+  if (/^(image|video)\//.test(file.type) || isLottieFile(file) || /\.lottie$/i.test(file.name || "")) addMediaFile(file, { placement });
 }
 
 // ---- motion preview on the stage (the editor itself stays still)
@@ -1991,7 +2007,7 @@ function mediaInfo(slide) {
   if (!desc) return null;
   const libraryKey = desc.src.startsWith("asset:") ? desc.src.slice(6) : null;
   const url = libraryKey ? `/assets/${E.PHOTOS[libraryKey]?.[0]}` : desc.src.startsWith("idb:") ? mediaUrls[desc.src] || "" : desc.src;
-  const label = slide.media?.name || (libraryKey ? `写真ライブラリ：${E.PHOTOS[libraryKey]?.[1] ?? ""}` : desc.kind === "youtube" ? "YouTube" : slide.customImage ? "取り込んだ写真" : "写真");
+  const label = slide.media?.name || (libraryKey ? `写真ライブラリ：${E.PHOTOS[libraryKey]?.[1] ?? ""}` : desc.kind === "youtube" ? "YouTube" : desc.kind === "lottie" ? "アニメーション" : slide.customImage ? "取り込んだ写真" : "写真");
   return { ...desc, url, label, libraryKey };
 }
 
@@ -2005,8 +2021,35 @@ function setSlideMedia(slide, media, placement = null) {
   slide.media = { ...media, ...(placement || needsPlace ? { placement: placement || { ...DEFAULT_PLACEMENT } } : {}) };
 }
 
+/** A Lottie animation (JSON from After Effects/Bodymovin or LottieFiles) → the checked text, or an error message. */
+async function readLottie(blob) {
+  const text = await blob.text();
+  let data = null;
+  try { data = JSON.parse(text); } catch { throw new Error("JSONとして読めません"); }
+  if (!data || !Array.isArray(data.layers) || !Number.isFinite(Number(data.fr)) || !Number.isFinite(Number(data.op))) throw new Error("Lottieアニメーション（JSON）ではないようです");
+  return text;
+}
+
+const isLottieFile = (file) => /\.json$/i.test(file?.name || "") || file?.type === "application/json";
+
+async function addLottieFile(file, { placement = null, index = state.selected } = {}) {
+  if (/\.lottie$/i.test(file.name || "")) return toast("「.lottie」形式は使えません。LottieFilesでは「Lottie JSON」を選んでダウンロードしてください");
+  if (file.size > 20_000_000) return toast("アニメーションが大きすぎます（20MBまで）");
+  try {
+    const text = await readLottie(file);
+    const src = await putMedia(new Blob([text], { type: "application/json" }), file.name);
+    pushUndo();
+    setSlideMedia(state.deck.slides[index], { src, kind: "lottie", name: file.name, autoplay: true, loop: true }, placement);
+    markChanged({ structural: true });
+    toast("アニメーションを入れました。発表中に再生されます（編集画面では途中の1コマを表示）");
+  } catch (error) {
+    toast(`読み込めませんでした：${error.message}`);
+  }
+}
+
 async function addMediaFile(file, { placement = null, index = state.selected } = {}) {
   if (!file || !state.deck?.slides[index]) return;
+  if (isLottieFile(file) || /\.lottie$/i.test(file.name || "")) return addLottieFile(file, { placement, index });
   const video = file.type.startsWith("video/");
   if (!video && !file.type.startsWith("image/")) return toast("写真（JPEG・PNG・WebP・GIF）か動画（MP4・WebM・MOV）を選んでください");
   if (video && file.size > 400_000_000) return toast("動画が大きすぎます（400MBまで）。短く切り出すか、YouTubeのURLを使ってください");
@@ -2023,9 +2066,28 @@ async function addMediaFile(file, { placement = null, index = state.selected } =
   }
 }
 
-function applyMediaUrl() {
+async function applyMediaUrl() {
   const url = $("mediaUrlInput").value.trim();
   if (!/^https:\/\//i.test(url)) return showStatus("mediaUrlStatus", "https:// で始まるURLを入れてください", "error");
+  if (/\.json(\?|#|$)/i.test(url) || /^https:\/\/(lottie\.host|[a-z0-9-]+\.lottiefiles\.com)\//i.test(url)) {
+    // Lottie from the web is copied into this browser, so the presentation and exported files work offline.
+    showStatus("mediaUrlStatus", "アニメーションを読み込んでいます…");
+    try {
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const text = await readLottie(await response.blob());
+      const name = decodeURIComponent(url.split("/").pop().split("?")[0]).slice(0, 60) || "アニメーション";
+      const src = await putMedia(new Blob([text], { type: "application/json" }), name);
+      pushUndo();
+      setSlideMedia(state.deck.slides[state.selected], { src, kind: "lottie", name, autoplay: true, loop: true });
+      markChanged({ structural: true });
+      $("mediaUrlDialog").close();
+      toast("アニメーションを入れました。発表中に再生されます");
+    } catch (error) {
+      showStatus("mediaUrlStatus", `読み込めませんでした（${error.message}）。LottieFilesの「Lottie JSON」のURL（lottie.host）を使うか、JSONファイルをダウンロードして「アニメーション」から入れてください`, "error");
+    }
+    return;
+  }
   const yt = E.youtubeId(url);
   const video = yt || /\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(url);
   pushUndo();
@@ -2052,15 +2114,19 @@ function mediaSection(slide) {
   const slotted = SLOTTED.has(slide.type) && !(slide.type === "imageText" && slide.image && typeof slide.image === "object");
   const photoInput = h("input", { type: "file", class: "hidden", accept: "image/png,image/jpeg,image/webp,image/gif", onchange: (event) => { addMediaFile(event.target.files?.[0]); event.target.value = ""; } });
   const videoInput = h("input", { type: "file", class: "hidden", accept: "video/mp4,video/webm,video/quicktime,video/*", onchange: (event) => { addMediaFile(event.target.files?.[0]); event.target.value = ""; } });
+  const lottieInput = h("input", { type: "file", class: "hidden", accept: ".json,application/json,.lottie", onchange: (event) => { addMediaFile(event.target.files?.[0]); event.target.value = ""; } });
   const set = (fn) => { pushUndo(); fn(); markChanged({ structural: true }); };
   const nodes = [];
   if (info) {
+    const lottieBox = info.kind === "lottie" && info.url ? h("div", { class: "lottie-thumb" }, h("div", { class: "hs-lottie-host", "data-src": info.url, "data-loop": "", "data-autoplay": "" })) : null;
     const preview = info.kind === "youtube"
       ? h("img", { src: `https://i.ytimg.com/vi/${info.yt}/mqdefault.jpg`, alt: "" })
-      : info.kind === "video" ? (info.url ? h("video", { src: info.url, muted: true, preload: "metadata" }) : h("span", {}, "動画がありません"))
-        : info.url ? h("img", { src: info.url, alt: "" }) : h("span", {}, "写真がありません");
+      : info.kind === "lottie" ? lottieBox || h("span", {}, "アニメーションがありません")
+        : info.kind === "video" ? (info.url ? h("video", { src: info.url, muted: true, preload: "metadata" }) : h("span", {}, "動画がありません"))
+          : info.url ? h("img", { src: info.url, alt: "" }) : h("span", {}, "写真がありません");
+    if (lottieBox) requestAnimationFrame(() => E.mountLottie(lottieBox, { play: true }));
     nodes.push(h("div", { class: "media-now" },
-      h("div", { class: "thumb" }, preview, h("span", { class: "kind" }, info.kind === "youtube" ? "YouTube" : info.kind === "video" ? "動画" : "写真")),
+      h("div", { class: "thumb" }, preview, h("span", { class: "kind" }, { youtube: "YouTube", video: "動画", lottie: "アニメーション" }[info.kind] ?? "写真")),
       h("div", { class: "info" },
         h("b", { title: info.label }, info.label),
         h("span", { class: "hint" }, info.placement ? "自由に配置（スライド上でドラッグ）" : "レイアウトの写真枠に表示"),
@@ -2072,7 +2138,12 @@ function mediaSection(slide) {
           slotted && info.libraryKey && !media ? h("button", { class: "btn btn-sm", type: "button", onclick: () => set(() => { slide.media = { src: `asset:${info.libraryKey}`, kind: "image", name: E.PHOTOS[info.libraryKey][1], placement: { ...DEFAULT_PLACEMENT } }; delete slide.visualAsset; }) }, "自由に配置") : null,
           h("button", { class: "btn btn-sm btn-danger", type: "button", onclick: () => set(() => { delete slide.media; delete slide.customImage; delete slide.imagePlacement; delete slide.visualAsset; }) }, "外す")))));
     const options = [];
-    if (media) {
+    if (media && info.kind === "lottie") {
+      options.push(
+        h("label", { class: "inline-check" }, h("input", { type: "checkbox", checked: media.autoplay !== false, onchange: (event) => set(() => { media.autoplay = event.target.checked; }) }), "スライドが出たら自動で再生（オフならクリックで再生）"),
+        h("label", { class: "inline-check" }, h("input", { type: "checkbox", checked: media.loop !== false, onchange: (event) => set(() => { media.loop = event.target.checked; }) }), "くり返し再生"),
+        h("label", { class: "inline-check" }, h("input", { type: "checkbox", checked: media.fit === "cover", onchange: (event) => set(() => { if (event.target.checked) media.fit = "cover"; else delete media.fit; }) }), "枠いっぱいに広げる（はみ出た部分は切れる）"));
+    } else if (media) {
       options.push(h("label", { class: "inline-check" }, h("input", { type: "checkbox", checked: media.fit === "contain", onchange: (event) => set(() => { if (event.target.checked) media.fit = "contain"; else delete media.fit; }) }), "切り取らずに全体を見せる"));
     }
     if (media && (info.kind === "video" || info.kind === "youtube")) {
@@ -2081,7 +2152,7 @@ function mediaSection(slide) {
         info.kind === "video" ? h("label", { class: "inline-check" }, h("input", { type: "checkbox", checked: media.loop !== false, onchange: (event) => set(() => { media.loop = event.target.checked; }) }), "くり返し再生") : null,
         h("label", { class: "inline-check" }, h("input", { type: "checkbox", checked: media.muted === false, onchange: (event) => set(() => { media.muted = !event.target.checked; }) }), "音を出す（Zoomでは「音声を共有」をオン）"));
     }
-    if (info.kind !== "youtube") {
+    if (info.kind !== "youtube" && info.kind !== "lottie") {
       options.push(h("label", { class: "field", style: { "margin-bottom": "0", "min-width": "180px" } }, h("span", { class: "field-label" }, "写真の動き（発表中）"),
         h("select", { onchange: (event) => set(() => { if (event.target.value === "none") delete slide.photoMotion; else slide.photoMotion = event.target.value; }) },
           PHOTO_MOTIONS.map(([value, text]) => h("option", { value, selected: (slide.photoMotion || "none") === value }, text)))));
@@ -2091,8 +2162,9 @@ function mediaSection(slide) {
   nodes.push(h("div", { class: "media-actions" },
     h("button", { class: "btn", type: "button", onclick: () => photoInput.click() }, uiIcon("camera"), "写真"),
     h("button", { class: "btn", type: "button", onclick: () => videoInput.click() }, uiIcon("video"), "動画"),
+    h("button", { class: "btn", type: "button", title: "After EffectsやLottieFilesのアニメーション（Lottie JSON）", onclick: () => lottieInput.click() }, uiIcon("sparkles"), "アニメーション"),
     h("button", { class: "btn", type: "button", onclick: () => { $("mediaUrlInput").value = ""; clearStatus("mediaUrlStatus"); $("mediaUrlDialog").showModal(); $("mediaUrlInput").focus(); } }, uiIcon("link"), "URL・YouTube")),
-  photoInput, videoInput);
+  photoInput, videoInput, lottieInput);
   const selectedKey = slide.visualAsset || (slide.media?.src?.startsWith("asset:") ? slide.media.src.slice(6) : "");
   nodes.push(h("details", { class: "illust-picker", "data-key": "library", open: !info || Boolean(selectedKey) },
     h("summary", { class: "hint", style: { cursor: "pointer", "font-weight": "700", "margin-bottom": "6px" } }, `写真ライブラリ（${Object.keys(E.PHOTOS).length}枚）`),
@@ -2102,7 +2174,7 @@ function mediaSection(slide) {
         h("img", { src: `/assets/${file}`, alt: label, loading: "lazy" }), h("span", { class: "cap" }, label))))));
   const where = SLOTTED.has(slide.type) ? "このレイアウトは写真枠があります。" : "このレイアウトでは、写真・動画をスライド上の好きな位置に置けます。";
   return h("div", { class: "section", "data-key": "media" },
-    h("div", { class: "section-title" }, h("span", {}, "写真・動画")),
+    h("div", { class: "section-title" }, h("span", {}, "写真・動画・アニメーション")),
     h("p", { class: "hint section-note" }, `${where}スライドへ直接ドラッグ＆ドロップもできます。`),
     nodes);
 }
@@ -2128,6 +2200,23 @@ function motionSection(slide, index) {
     h("div", { class: "motion-grid", role: "radiogroup" }, Object.entries(BUILD_INFO).map(([value, [label]]) => h("button", { type: "button", role: "radio", "aria-checked": String(value === current), class: value === current ? "selected" : "", title: BUILD_INFO[value][1], onclick: () => set(value) }, glyph(value), label))),
     h("div", { class: "hint", style: { "margin-top": "6px" } }, current === "auto" ? `おまかせ：このレイアウトは「${BUILD_INFO[recommended][0]}」。${BUILD_INFO[recommended][1]}` : BUILD_INFO[effective][1]),
     h("button", { class: "btn btn-ghost btn-sm", type: "button", style: { "margin-top": "6px", padding: "0" }, onclick: () => openDesignDialog() }, "切り替え・登場のしかた・マウスを乗せたときの動き（資料全体）→"));
+}
+
+// ---- motion graphics for one slide (the deck's defaults live in the design dialog)
+
+function motionGraphicsSection(slide) {
+  const deckMotion = normalizeMotion(state.deck.motion || DEFAULT_MOTION);
+  const kinetic = E.kineticOf(slide, slide.type, deckMotion);
+  const backdrop = E.backdropOf(slide, slide.type, deckMotion);
+  const set = (key, value) => { pushUndo(); if (value === "auto") delete slide[key]; else slide[key] = value; markChanged({ structural: true }); };
+  const select = (key, info, label) => h("label", { class: "field", style: { "margin-bottom": "0" } }, h("span", { class: "field-label" }, label),
+    h("select", { "data-mg": key, onchange: (event) => set(key, event.target.value) }, Object.entries(info).map(([value, text]) => h("option", { value, selected: (slide[key] || "auto") === value }, text))));
+  const now = `いま：文字は「${kinetic ? E.KINETIC[kinetic].replace(/（.*）/, "") : "動かさない"}」、背景は「${backdrop ? E.BACKDROPS[backdrop] : "なし"}」`;
+  return h("div", { class: "section", "data-key": "motion-graphics" },
+    h("div", { class: "section-title" }, h("span", {}, "モーショングラフィック"),
+      h("span", { class: "btns" }, h("button", { class: "btn btn-sm", type: "button", onclick: () => previewMotion() }, "▶ 確認"))),
+    h("div", { class: "grid-2" }, select("kinetic", KINETIC_INFO, TITLED(slide.type) && !["hero", "statement"].includes(slide.type) ? "タイトルの動き" : "大きな文字の動き"), select("backdrop", BACKDROP_INFO, "背景の動き")),
+    h("div", { class: "hint", style: { "margin-top": "6px" } }, `${now}。おまかせは「デザインと動き」の設定に従います（表紙・章扉・ひと言・最後のスライド）。`));
 }
 
 const ITEM_NAMES = { items: "項目", steps: "工程", points: "要点", rows: "行", milestones: "時期", lanes: "レーン", levels: "段", branches: "枝", stats: "指標", flows: "流れ", message: "アクション", leftItems: "左", rightItems: "右" };
@@ -2184,6 +2273,7 @@ function renderInspector() {
   const keepOpen = sameSlide ? [...panel.querySelectorAll("details[data-key][open]")].map((el) => el.dataset.key) : [];
   const keepClosed = sameSlide ? [...panel.querySelectorAll("details[data-key]:not([open])")].map((el) => el.dataset.key) : [];
   panel.dataset.slide = String(index);
+  E.stopLottie(panel);
   const canAi = state.codexAuthorized;
   const chips = ["もっと簡潔に", "結論を先に", "具体例を加えて", "数字を強調", "図解に変えて", "やさしい言葉で"];
   panel.replaceChildren(
@@ -2202,6 +2292,7 @@ function renderInspector() {
         specFor(slide.type).map((field) => inputFor(field, [field.key], slide))),
       mediaSection(slide),
       TITLED(slide.type) ? motionSection(slide, index) : null,
+      motionGraphicsSection(slide),
       TITLED(slide.type) || slide.type === "closing" ? detailsSection(slide, index) : null,
       h("div", { class: "section" }, h("div", { class: "section-title" }, h("span", {}, "スピーカーノート"),
           h("span", { class: "btns" },
@@ -2281,7 +2372,7 @@ function renderThemeGrid() {
 
 function syncDesignControls() {
   const deck = state.deck;
-  const motion = deck.motion || DEFAULT_MOTION;
+  const motion = normalizeMotion(deck.motion || DEFAULT_MOTION);
   $("accentInput").value = deck.accent || themeMeta(deck.theme).swatch[2];
   $("accentReset").disabled = !deck.accent;
   $("transitionSelect").value = deck.transition || "fade";
@@ -2289,12 +2380,34 @@ function syncDesignControls() {
   $("hoverSelect").value = motion.hover || "lift";
   $("numbersCheck").checked = motion.numbers !== false;
   $("ambientCheck").checked = motion.ambient !== false;
+  $("drawCheck").checked = motion.draw !== false;
+  for (const card of document.querySelectorAll("#backdropGrid .motion-card")) card.setAttribute("aria-checked", String(card.dataset.value === motion.backdrop));
+  for (const card of document.querySelectorAll("#kineticGrid .motion-card")) card.setAttribute("aria-checked", String(card.dataset.value === motion.kinetic));
+}
+
+// Live previews of every motion graphic, drawn on the deck's own cover (and replayed while the dialog is open).
+let motionCardsTimer = null;
+function renderMotionGrids() {
+  const deck = state.deck;
+  const cover = deck.slides[0];
+  const motion = normalizeMotion(deck.motion || DEFAULT_MOTION);
+  const card = (current, value, label, patch) => {
+    const el = E.render(cover, { ...renderOptions(), deck: { ...deck, motion: { ...motion, ...patch } }, index: 0, mode: "preview", fit: fitFor(0) ?? undefined });
+    return h("button", { type: "button", class: "motion-card", role: "radio", "data-value": value, "aria-checked": String(current === value), onclick: () => setDeckDesign({ motion: patch }) }, E.mount(el), h("b", {}, label));
+  };
+  $("backdropGrid").replaceChildren(...["none", ...Object.keys(E.BACKDROPS)].map((kind) => card(motion.backdrop, kind, kind === "none" ? "テーマの飾り" : E.BACKDROPS[kind], { backdrop: kind })));
+  $("kineticGrid").replaceChildren(...["none", ...Object.keys(E.KINETIC)].map((style) => card(motion.kinetic, style, style === "none" ? "動かさない" : E.KINETIC[style].replace(/（.*）/, ""), { kinetic: style })));
+  const replay = () => { for (const slide of document.querySelectorAll("#kineticGrid .motion-card .hs-slide")) E.play(slide); };
+  clearInterval(motionCardsTimer);
+  requestAnimationFrame(replay);
+  motionCardsTimer = setInterval(() => { if ($("designDialog").open) replay(); else clearInterval(motionCardsTimer); }, 3600);
 }
 
 function openDesignDialog() {
   if (!state.deck) return;
   useFonts(E.THEMES.map((theme) => theme.id));
   renderThemeGrid();
+  renderMotionGrids();
   syncDesignControls();
   $("designDialog").showModal();
 }
@@ -2309,7 +2422,12 @@ function setDeckDesign(patch, { quiet = false } = {}) {
   if (patch.motion) deck.motion = normalizeMotion({ ...(deck.motion || DEFAULT_MOTION), ...patch.motion });
   useFonts([deck.theme]);
   markChanged({ structural: true });
-  if ($("designDialog").open) { renderThemeGrid(); syncDesignControls(); }
+  if ($("designDialog").open) {
+    renderThemeGrid();
+    // Motion previews follow the theme, the accent and each other (the kinetic cards show the chosen backdrop).
+    if (patch.theme || "accent" in patch || patch.motion) renderMotionGrids();
+    syncDesignControls();
+  }
   if (patch.theme && !quiet) toast(`テーマを「${themeMeta(deck.theme).name}」にしました（⌘Zで元に戻せます）`);
 }
 
@@ -2990,12 +3108,24 @@ function createProposal(id, chat, base, baseDeck, { whole = false } = {}) {
   if (chat.deckTitle) selected.add("title");
   if (chat.theme) selected.add("theme");
   if (chat.transition) selected.add("transition");
-  const proposal = { id, base, baseDeck, baseSlides: clone(baseDeck.slides), baseTitle: baseDeck.title, slides, items: chat.items || [], deleted: chat.deleted || [], moved: Boolean(chat.moved), deckTitle: chat.deckTitle, theme: chat.theme, transition: chat.transition, issues: chat.issues || [], selected, whole };
+  const motion = chat.motion && typeof chat.motion === "object" && Object.keys(chat.motion).length ? chat.motion : null;
+  if (motion) selected.add("motion");
+  const proposal = { id, base, baseDeck, baseSlides: clone(baseDeck.slides), baseTitle: baseDeck.title, slides, items: chat.items || [], deleted: chat.deleted || [], moved: Boolean(chat.moved), deckTitle: chat.deckTitle, theme: chat.theme, transition: chat.transition, motion, issues: chat.issues || [], selected, whole };
   proposals.set(id, proposal);
   renderChat();
 }
 
-const TRANSITION_LABEL = { fade: "フェード", slide: "スライド", zoom: "ズーム", morph: "モーフ", none: "なし" };
+const TRANSITION_LABEL = { fade: "フェード", slide: "スライド", zoom: "ズーム", morph: "モーフ", wipe: "ワイプ", circle: "サークル", none: "なし" };
+
+/** "文字：マスク → タイプライター／背景：なし → 軌道" for a deck-wide motion change. */
+function motionChangeText(before = {}, patch = {}) {
+  const was = normalizeMotion(before);
+  const parts = [];
+  if (patch.kinetic) parts.push(`大きな文字：${KINETIC_INFO[was.kinetic]} → ${KINETIC_INFO[patch.kinetic]}`);
+  if (patch.backdrop) parts.push(`背景：${BACKDROP_INFO[was.backdrop]} → ${BACKDROP_INFO[patch.backdrop]}`);
+  if (typeof patch.draw === "boolean") parts.push(`線を描く：${patch.draw ? "オン" : "オフ"}`);
+  return parts.join("／");
+}
 
 function proposalCard(message) {
   const meta = message.proposal;
@@ -3041,6 +3171,12 @@ function proposalCard(message) {
     useFonts([proposal.theme]);
   }
   if (proposal.transition) rows.push(h("div", { class: "change-row" }, h("label", {}, toggle("transition"), "スライドの切り替え"), h("span", { class: "hint", style: { "font-size": "11.5px" } }, `${TRANSITION_LABEL[proposal.baseDeck.transition] ?? "フェード"} → ${TRANSITION_LABEL[proposal.transition]}`)));
+  if (proposal.motion) {
+    const motionDeck = { ...designDeck, motion: normalizeMotion({ ...(proposal.baseDeck.motion || DEFAULT_MOTION), ...proposal.motion }) };
+    rows.push(h("div", { class: "change-row" }, h("label", {}, toggle("motion"), "モーショングラフィック（資料全体）"), h("span", { class: "hint", style: { "font-size": "11.5px" } }, motionChangeText(proposal.baseDeck.motion, proposal.motion)),
+      h("div", { class: "change-thumbs", onclick: () => openCompare(() => slidePicture(proposal.baseSlides[0], 0, proposal.baseDeck), () => slidePicture(proposal.baseSlides[0], 0, motionDeck), "動きの変更（表紙）") },
+        slidePicture(proposal.baseSlides[0], 0, proposal.baseDeck), h("span", { class: "arrow" }, "→"), slidePicture(proposal.baseSlides[0], 0, motionDeck))));
+  }
   return h("div", { class: "proposal" },
     h("div", { class: "proposal-head" }, h("span", {}, `変更の提案：${meta.summary}`)),
     h("div", { class: "proposal-rows" }, rows),
@@ -3106,6 +3242,7 @@ function applyProposal(id) {
   if (proposal.deckTitle && proposal.selected.has("title")) { state.deck.title = proposal.deckTitle; $("deckTitleInput").value = proposal.deckTitle; }
   if (proposal.theme && proposal.selected.has("theme")) { state.deck.theme = proposal.theme; useFonts([proposal.theme]); }
   if (proposal.transition && proposal.selected.has("transition")) state.deck.transition = proposal.transition;
+  if (proposal.motion && proposal.selected.has("motion")) state.deck.motion = normalizeMotion({ ...(state.deck.motion || DEFAULT_MOTION), ...proposal.motion });
   const first = proposal.items.findIndex((item, index) => item.changed && (proposal.selected.has(`c${index}`) || proposal.selected.has(`n${index}`)));
   if (first >= 0) state.selected = Math.min(first, slides.length - 1);
   state.selected = Math.min(state.selected, slides.length - 1);
@@ -3372,6 +3509,8 @@ function commandList() {
       cmd("資料", "{}", "JSONで保存", () => saveJsonFile()),
       cmd("デザイン", "◐", "デザインと動き（テーマ・色・切り替え）", () => openDesignDialog()),
       ...E.THEMES.map((theme) => cmd("デザイン", "◐", `テーマ：${theme.name}`, () => setDeckDesign({ theme: theme.id }), theme.desc)),
+      ...Object.entries(E.BACKDROPS).map(([kind, label]) => cmd("動き", "◎", `背景の動き：${label}`, () => { setDeckDesign({ motion: { backdrop: kind } }); toast(`表紙・章扉などの背景を「${label}」にしました`); }, "モーショングラフィック（資料全体）")),
+      ...Object.entries(E.KINETIC).map(([style, label]) => cmd("動き", "◎", `文字の動き：${label.replace(/（.*）/, "")}`, () => { setDeckDesign({ motion: { kinetic: style } }); toast(`大きな文字の動きを「${label.replace(/（.*）/, "")}」にしました`); }, "モーショングラフィック（資料全体）")),
       cmd("スライド", "▶", "このスライドの動きを確認", () => previewMotion()),
       cmd("スライド", "＋", "スライドを追加", () => openTypeDialog("insert")),
       cmd("スライド", "⇄", "このスライドのレイアウトを変更", () => openTypeDialog("change")),
@@ -3521,8 +3660,10 @@ async function printPdf() {
   const root = $("printRoot");
   root.replaceChildren(...state.deck.slides.map((slide, i) => E.render(slide, renderOptions({ index: i, mode: "print", fit: fitFor(i) ?? undefined }))));
   await Promise.all([...root.querySelectorAll("img")].map((img) => img.decode?.().catch(() => {})));
+  await E.mountLottie(root, { play: false, frame: 0.5 });
+  await wait(120);
   await document.fonts?.ready;
-  const cleanup = () => { root.replaceChildren(); window.removeEventListener("afterprint", cleanup); };
+  const cleanup = () => { E.stopLottie(root); root.replaceChildren(); window.removeEventListener("afterprint", cleanup); };
   window.addEventListener("afterprint", cleanup);
   toast("印刷画面で「PDFとして保存」を選び、余白を「なし」にしてください");
   setTimeout(() => window.print(), 80);
@@ -3581,9 +3722,11 @@ async function portableDeck() {
   return { deck, assets, bytes, missing };
 }
 
-async function standaloneHtml({ title, body, boot, data, background = "#07080c", extraCss = "" }) {
+async function standaloneHtml({ title, body, boot, data, background = "#07080c", extraCss = "", player = false }) {
   const bundle = await engineBundle();
   const fonts = E.fontHref([data.deck.theme]);
+  // The Lottie player travels with the file only when a slide has an animation to play.
+  const lottie = player && data.deck.slides.some((slide) => slide.media?.kind === "lottie") ? (await fetchText("/vendor/lottie.js")).replace(/<\/script/gi, "<\\/script") : "";
   return `<!doctype html>
 <html lang="ja">
 <head>
@@ -3601,6 +3744,7 @@ ${fonts ? `<link rel="stylesheet" href="${esc(fonts)}" data-hs-fonts>` : ""}
 ${body}
 <script>${bundle.engine}</script>
 <script>${bundle.motion}</script>
+${lottie ? `<script>${lottie}</script>` : ""}
 <script type="application/json" id="hs-data">${safeJson(data)}</script>
 <script>${boot}</script>
 </body>
@@ -3641,7 +3785,7 @@ async function exportHtml({ checked = false } = {}) {
     const { deck, assets, bytes, missing } = await portableDeck();
     if (deck.slides[0].type === "title" && !deck.slides[0].date) deck.slides[0].date = new Date().toLocaleDateString("ja-JP", { year: "numeric", month: "long", day: "numeric" });
     const fits = state.deck.slides.map((_, i) => { const fit = fitFor(i); return fit ? { fs: fit.fs, ts: fit.ts } : null; });
-    const html = await standaloneHtml({ title: deck.title, body: '<div class="hs-boot">読み込み中…</div>', boot: EXPORT_BOOT, data: { deck, fits, assets } });
+    const html = await standaloneHtml({ title: deck.title, body: '<div class="hs-boot">読み込み中…</div>', boot: EXPORT_BOOT, data: { deck, fits, assets }, player: true });
     const fileName = `${fileSafe(deck.title, "presentation")}_${today()}.html`;
     await downloadBlob(new Blob([html], { type: "text/html" }), fileName);
     state.historyId = saveHistory({ exported: fileName });
@@ -4016,6 +4160,8 @@ function bind() {
   $("hoverSelect").addEventListener("change", (event) => setDeckDesign({ motion: { hover: event.target.value } }));
   $("numbersCheck").addEventListener("change", (event) => setDeckDesign({ motion: { numbers: event.target.checked } }));
   $("ambientCheck").addEventListener("change", (event) => setDeckDesign({ motion: { ambient: event.target.checked } }));
+  $("drawCheck").addEventListener("change", (event) => setDeckDesign({ motion: { draw: event.target.checked } }));
+  $("designDialog").addEventListener("close", () => clearInterval(motionCardsTimer));
   $("designPreviewBtn").addEventListener("click", () => { $("designDialog").close(); setView("single"); previewMotion(); });
   $("mediaUrlApply").addEventListener("click", applyMediaUrl);
   $("mediaUrlInput").addEventListener("keydown", (event) => { if (event.key === "Enter" && !event.isComposing) { event.preventDefault(); applyMediaUrl(); } });

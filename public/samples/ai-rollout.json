@@ -4,6 +4,10 @@
   "purpose": "意思決定・報告",
   "theme": "clarity",
   "transition": "fade",
+  "motion": {
+    "kinetic": "mask",
+    "backdrop": "orbits"
+  },
   "slideData": [
     {
       "type": "title",
@@ -966,7 +970,8 @@
     {
       "type": "statement",
       "title": "私たちが目指すこと",
-      "text": "AIに**作業**を任せ、人は**判断と対話**に時間を使う会社へ"
+      "text": "AIに**作業**を任せ、人は**判断と対話**に時間を使う会社へ",
+      "kinetic": "type"
     },
     {
       "type": "hero",

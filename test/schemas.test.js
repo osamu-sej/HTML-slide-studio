@@ -40,6 +40,17 @@ test("Codex output schemas satisfy strict structured-output rules", () => {
   assert.match(chat, /"photoMotion"/);
   assert.match(chat, /"details"/);
   assert.match(chat, /"theme"/);
+  // Motion graphics: the AI may choose kinetic type and backdrops per slide, and change the deck's defaults in chat.
+  for (const schema of [codexDeckSchema, codexChatSchema, codexSlideSchema, codexVariantsSchema]) {
+    const text = JSON.stringify(schema);
+    assert.match(text, /"kinetic"/);
+    assert.match(text, /"backdrop"/);
+    assert.match(text, /"orbits"/);
+    assert.match(text, /"scramble"/);
+  }
+  assert.match(chat, /"motion"/);
+  assert.match(chat, /"wipe"/);
+  assert.match(chat, /"circle"/);
   assert.equal(codexSlideSchema.type, "object");
   assert.equal(SLIDE_TYPES.length, 42);
   assert.ok(SLIDE_TYPES.includes("hero") && SLIDE_TYPES.includes("statement"));

@@ -429,6 +429,32 @@ test("chat proposes operations on the original numbering, keeps photos and video
   });
 });
 
+test("chat can change the deck's motion graphics and keeps a slide's own motion when rewriting it", async () => {
+  await withFakeCodex([
+    {
+      reply: "表紙と章扉の背景を波にし、2枚目の文言を短くしました。",
+      operations: [{ op: "replace", slide: 2, content: { type: "content", title: "本文1", takeaway: "短い結論", points: ["A"] } }],
+      motion: { backdrop: "waves", kinetic: "mask" },
+      suggestions: [],
+    },
+  ], async (server, prompts) => {
+    const slides = shortDeck(4).slideData;
+    slides[1].kinetic = "chars";
+    slides[1].backdrop = "lines";
+    const deck = { title: "テスト", theme: "clarity", transition: "fade", motion: { kinetic: "mask", backdrop: "none" }, slides };
+    const job = await waitForJob(server, (await (await server.postJson("/api/decks/chat", { deck, message: "表紙の背景をもっと動かして" })).json()).jobId);
+    assert.equal(job.status, "completed", job.error);
+    const { chat } = job;
+    assert.deepEqual(chat.motion, { backdrop: "waves" }, "only what changes is proposed");
+    assert.match(chat.summary, /動きを変更/);
+    assert.equal(chat.slides[1].kinetic, "chars", "the slide's own kinetic type stays");
+    assert.equal(chat.slides[1].backdrop, "lines", "and so does its backdrop");
+    const [prompt] = await prompts();
+    assert.match(prompt, /大きな文字の動き: mask、背景の動き: none/);
+    assert.match(prompt, /kinetic・backdrop/);
+  });
+});
+
 test("chat answers questions without changing the deck and rejects unusable operations", async () => {
   await withFakeCodex([
     { reply: "表紙は削除できないため、代わりに…", operations: [{ op: "delete", slide: 1 }], suggestions: [] },
@@ -536,12 +562,17 @@ test("three variants of one slide keep its photo and report overflow per variant
 test("the deck schema accepts every layout, video, details, builds and deck-wide design", async () => {
   await withFakeCodex([{ reply: "OK", operations: [], suggestions: [] }], async (server) => {
     const sample = JSON.parse(await readFile(join(root, "public", "samples", "ai-rollout.json"), "utf8"));
-    const deck = { title: sample.deckTitle, theme: "kinari", accent: "#2d4b78", transition: "zoom", motion: { entrance: "pop", hover: "none", numbers: false, ambient: false }, slides: sample.slideData };
+    const deck = { title: sample.deckTitle, theme: "kinari", accent: "#2d4b78", transition: "wipe", motion: { entrance: "pop", hover: "none", numbers: false, ambient: false, kinetic: "type", backdrop: "orbits", draw: false }, slides: sample.slideData };
     deck.slides[2].media = { src: "idb:video1", kind: "video", autoplay: true, loop: false, muted: false, placement: { x: 0.5, y: 0.4, w: 0.3, h: 0.3 } };
+    deck.slides[4].media = { src: "idb:anim1", kind: "lottie", name: "spin.json", fit: "cover", autoplay: false, loop: true };
+    deck.slides[0].backdrop = "grid";
+    deck.slides[1].kinetic = "chars";
     const response = await server.postJson("/api/decks/chat", { deck, message: "流れを確認して" });
     assert.equal(response.status, 202, await response.clone().text());
     const bad = await server.postJson("/api/decks/chat", { deck: { ...deck, theme: "neon" }, message: "x" });
     assert.equal(bad.status, 400);
+    const badMotion = await server.postJson("/api/decks/chat", { deck: { ...deck, motion: { backdrop: "fireworks" } }, message: "x" });
+    assert.equal(badMotion.status, 400);
   });
 });
 

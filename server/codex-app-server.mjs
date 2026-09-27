@@ -119,6 +119,8 @@ const LAYOUT_GUIDE = [
   "動き（HTML発表のときだけ効く。PowerPointの図形アニメーションとは別物）:",
   "- animation: 項目の出し方。auto（レイアウトに合わせて自動。通常はこれ・省略可）/ click（クリックのたびに1項目ずつ。工程・計画を話しながら見せる）/ cascade（順番に自動）/ fade（まとめて）/ none",
   "- photoMotion: 写真の動き。none / zoom（ゆっくり寄る）/ pan（ゆっくり横に流れる）/ float（ふわっと漂う）/ parallax（マウスに合わせて奥行き）。写真のあるスライドだけ",
+  "- kinetic（モーショングラフィック：大きな文字の動き）: auto（省略可。表紙・章扉・statement・hero・closing は資料の設定で自動的に動く）/ none / mask（下から立ち上がる。上品で汎用）/ words（ことばごとにぼかしから浮かぶ）/ chars（1文字ずつ弾む。研修・キックオフ向け）/ type（タイプライター。問いかけ・引用に）/ scramble（文字が入れ替わって決まる。テクノロジー・データの話題に）。本文スライドに付けるとタイトルが動く。資料全体で1〜2種類にそろえ、本文スライドには多用しない",
+  "- backdrop（モーショングラフィック：スライドの後ろで動く図形）: auto（省略可）/ none / particles（粒子が昇る）/ waves（波が流れる）/ grid（グリッドと走査線。データ・DX）/ orbits（軌道を回る。AI・テクノロジー・全体像）/ gradient（色がゆらぐ。ビジョン・未来）/ lines（線を光が流れる。つながり・流れ・データ連携）/ shapes（図形が漂う。研修・アイデア）。表紙・章扉・statement・closing に向く。本文の多いスライドには付けない。資料全体で同じ種類にそろえる",
   "- details（その項目をクリックすると開く補足カード）: [{target（項目の配列名と0始まりの番号。例: items[0]、steps[2]、milestones[1]、levels[0]、points[1]、branches[0]、leftItems[0]、stats[0]、rows[0]）, title（任意・20字以内）, text（120字以内）}]。スライドの本文は短いまま、話しながら見せたい根拠・具体例・内訳・数値の出所を text に書く（素材にない数値は書かない）。既存の details は頼まれない限りそのまま残す",
 ];
 
@@ -176,7 +178,7 @@ function memoLines(deck) {
   return memo ? ["", "この資料の前提条件（必ず守る）:", memo, ""] : [];
 }
 
-const THEME_LINE = "テーマ（見た目）: clarity=クリア（白地に深い青） / midnight=ミッドナイト（濃紺の舞台） / editorial=エディトリアル（明朝と朱） / mono=モノ（黒い罫線と赤） / forest=フォレスト（緑と黄土） / sunset=サンセット（コーラルと琥珀） / aurora=オーロラ（漂う光とガラス） / kinari=生成り（和の落ち着き）。切り替え: none / fade / slide / zoom / morph（見出しがつながって動く）";
+const THEME_LINE = "テーマ（見た目）: clarity=クリア（白地に深い青） / midnight=ミッドナイト（濃紺の舞台） / editorial=エディトリアル（明朝と朱） / mono=モノ（黒い罫線と赤） / forest=フォレスト（緑と黄土） / sunset=サンセット（コーラルと琥珀） / aurora=オーロラ（漂う光とガラス） / kinari=生成り（和の落ち着き）。切り替え: none / fade / slide / zoom / morph（見出しがつながって動く） / wipe（色の帯が横切る） / circle（クリックした所から円が広がる）";
 
 export function buildChatPrompt({ deck, message, history = [], current = 0, focus = [], attachment = null }) {
   const slides = withoutImageData(deck.slides ?? []);
@@ -197,18 +199,19 @@ export function buildChatPrompt({ deck, message, history = [], current = 0, focu
     "- order: スライドの順番を入れ替えるときだけ、元の枚数を新しい順に並べた配列（削除したものは除く）。入れ替えないなら省略",
     "- deckTitle: 資料名の変更を頼まれたときだけ",
     "- theme / transition: 見た目のテーマやスライドの切り替えの変更を頼まれたときだけ（下の一覧から選ぶ）",
+    "- motion: 資料全体の動き（モーショングラフィック）の変更を頼まれたときだけ。kinetic（表紙・章扉などの大きな文字の動き）/ backdrop（表紙・章扉・statement・最後のスライドの後ろで動く図形）/ draw（アイコン・線・マーカーを描くように見せるか）。1枚だけなら、そのスライドの kinetic・backdrop を変える",
     "- suggestions: ユーザーが次に頼みそうな改善を最大3つ。20字以内の依頼文（例：「結論を1枚目に寄せて」「工程をクリックで1つずつ出して」）",
     "- 頼まれていないスライドは変えない。直すときは必要最小限にする",
     "- 変更前に、資料の目的→各スライドの役割→対象スライドの主張と根拠→前後とのつながりを確認する。本文を読まずに見出しだけで判断しない",
     "- 指示が曖昧でも、現在のスライドと直近の会話から対象を特定する。明確な対象がない場合は勝手に広げず、質問する",
-    "- 「動きをつけて」「クリックで詳しく」「写真を動かして」などは animation・details・photoMotion で応える。動画はユーザーが画面の「写真・動画」から追加するもので、あなたは入れられない",
+    "- 「動きをつけて」「クリックで詳しく」「写真を動かして」などは animation・details・photoMotion で応える。「モーショングラフィック」「文字を動かして」「背景を動かして」「もっと派手に」は kinetic・backdrop（1枚なら各スライド、全体なら motion）で応える。動画やLottieアニメーションはユーザーが画面の「写真・動画・アニメーション」から追加するもので、あなたは入れられない",
     "- 写真は、ユーザーが明示的に求めたときだけ新規選択・変更する。見た目を良くする依頼でも、無関係な素材を足さずレイアウト・余白・情報の強弱を優先する",
     "- 1枚目は title、最後は closing のままにする。表紙と最後は削除・移動しない",
     "- 入力にない数値や事実は作らない。既存の数値は変えない。「[画像あり]」「[写真・動画あり]」の値はそのまま残す",
     "- 新しい画像は生成できない。既存の写真を選ぶことと画像生成を混同せず、生成したと説明しない",
     "- 本文スライドには結論を一文で言い切る takeaway を入れる。文字数の上限を守る",
     ...memoLines(deck),
-    `資料: ${deck.title ?? ""}（対象者: ${deck.audience || "未指定"}、目的: ${deck.purpose || "未指定"}、全${total}枚、テーマ: ${deck.theme || "clarity"}、切り替え: ${deck.transition || "fade"}）`,
+    `資料: ${deck.title ?? ""}（対象者: ${deck.audience || "未指定"}、目的: ${deck.purpose || "未指定"}、全${total}枚、テーマ: ${deck.theme || "clarity"}、切り替え: ${deck.transition || "fade"}、大きな文字の動き: ${deck.motion?.kinetic || "mask"}、背景の動き: ${deck.motion?.backdrop || "none"}）`,
     `ユーザーが今見ているスライド: ${current + 1}枚目${targets.length ? `／ユーザーが指定したスライド: ${targets.map((n) => `${n}枚目`).join("、")}` : ""}`,
     "「この1枚」「このスライド」は今見ているスライドを指す。",
     "資料全体の骨子（各枚の役割・主張・根拠。対象の前後は詳しく示す）:",
@@ -348,6 +351,7 @@ export function buildDeckPrompt(input) {
     "- 研修・勉強会資料では、理解から実行へ進む物語（背景→要点→比較→手順→注意点→次アクション）を優先する",
     "- 素材にスライドへ載せきれない補足（根拠・具体例・内訳・数値の出所）があるときは、その項目の details に書く（資料全体で3〜6か所まで。本文はそのぶん短くする）",
     "- animation は基本的に省略（auto）。発表者が話しながら1つずつ見せたい工程・計画・原因分解だけ click を指定してよい",
+    "- モーショングラフィック: 表紙（title）・章扉（section）・closing には、資料の話題に合う backdrop を1種類選んで同じものを付ける（AI・テクノロジー→orbits、データ・DX→grid、つながり・業務の流れ→lines、ビジョン→gradient、研修・キックオフ→shapes か particles）。kinetic は省略（自動で mask）してよく、研修・キックオフなら chars、問いかけの statement なら type を使ってよい",
     "- 最後のclosingには、誰が・いつまでに・何をするかが分かる具体的な次のアクションを入れる",
     "- 各スライドに、発表者が読み上げられる自然な notes（2〜4文）を付ける",
     ...audienceLines(input.audience),
@@ -453,7 +457,7 @@ export function buildRewritePrompt({ deck, instruction, settings = {} }) {
     "「[画像あり]」「[写真・動画あり]」と書かれた値は写真・動画なので、そのまま残す（別の文字に書き換えない）。",
     `文字量: ${density.label}（${density.rule}）`,
     `対象者: ${deck.audience || "未指定"} ／ 目的: ${deck.purpose || "未指定"}`,
-    "各本文スライドの takeaway と notes を保つか改善する。指示に関係しない良い部分は無理に変えない。details・animation・photoMotion は指示がなければ残す。",
+    "各本文スライドの takeaway と notes を保つか改善する。指示に関係しない良い部分は無理に変えない。details・animation・photoMotion・kinetic・backdrop は指示がなければ残す。",
     "資料の主張と前後の流れを先に読み、修正後も根拠から結論へのつながりを保つ。写真は見た目の穴埋めに追加せず、個々のスライドの本文と具体的に合うものだけにする。",
     "",
     ...LAYOUT_GUIDE,

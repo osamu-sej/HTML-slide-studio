@@ -397,6 +397,7 @@ input[type="color"] { width: 44px; height: 32px; padding: 2px; border: 1px solid
 .media-now .thumb { position: relative; aspect-ratio: 16 / 9; border-radius: 6px; overflow: hidden; background: var(--canvas-2); display: grid; place-items: center; color: var(--muted); font-size: 11px; }
 .media-now .thumb img, .media-now .thumb video { width: 100%; height: 100%; object-fit: cover; display: block; }
 .media-now .thumb .kind { position: absolute; left: 4px; bottom: 4px; padding: 1px 6px; border-radius: 5px; background: rgba(20, 22, 28, .75); color: #fff; font-size: 10px; font-weight: 700; }
+.media-now .thumb .lottie-thumb { position: absolute; inset: 0; background: repeating-conic-gradient(var(--canvas-2) 0 25%, var(--surface) 0 50%) 0 0 / 12px 12px; }
 .media-now .info { display: grid; gap: 4px; min-width: 0; font-size: 12px; }
 .media-now .info b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .media-now .info .row { display: flex; flex-wrap: wrap; gap: 4px; }
@@ -454,7 +455,17 @@ dialog[open] { animation: dialog-in .22s cubic-bezier(.16, 1, .3, 1); }
 .theme-card span { font-size: 11px; color: var(--muted); padding: 0 3px; line-height: 1.4; }
 .design-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
 .accent-row { display: flex; align-items: center; gap: 6px; }
-.design-checks { display: flex; flex-wrap: wrap; gap: 10px 22px; margin: 4px 0 10px; }
+.design-checks { display: flex; flex-wrap: wrap; gap: 10px 22px; margin: 4px 0 18px; }
+/* motion graphics: live previews on the deck's cover */
+.mg-note { margin: -4px 0 10px; }
+.mg-label { margin: 0 0 6px; font-size: 11.5px; font-weight: 700; color: var(--muted); }
+.motion-cards { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 16px; }
+.motion-card { display: grid; gap: 5px; padding: 5px 5px 7px; border: 1.5px solid var(--line); border-radius: 11px; background: #fff; text-align: left; transition: border-color .15s, box-shadow .15s, transform .15s; }
+.motion-card:hover { transform: translateY(-2px); box-shadow: var(--shadow); }
+.motion-card[aria-checked="true"] { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(79, 70, 229, .16); }
+.motion-card .hs-scaler { border-radius: 7px; box-shadow: 0 0 0 1px var(--line); }
+.motion-card b { font-size: 12px; padding: 0 3px; }
+.motion-card[aria-checked="true"] b { color: var(--accent-ink); }
 .history-heading { margin: 4px 0 6px; font-size: 13px; }
 #versionList { margin-bottom: 16px; }
 .history-list { display: grid; gap: 8px; }
@@ -546,7 +557,7 @@ kbd { display: inline-block; min-width: 20px; padding: 1px 6px; border: 1px soli
   .chat-log { max-height: 60vh; }
   .compare-grid { grid-template-columns: 1fr; }
   .inspector-body { overflow: visible; }
-  .theme-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .theme-grid, .motion-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .outline-item { grid-template-columns: 24px minmax(0, 1fr) auto; }
   .outline-item select, .outline-item .texts { grid-column: 2; }
   .deck-title-input { order: 10; max-width: none; flex-basis: 100%; }

@@ -198,6 +198,8 @@
               <option value="slide">スライド（横に流れる）</option>
               <option value="zoom">ズーム</option>
               <option value="morph">モーフ（見出しがつながって動く）</option>
+              <option value="wipe">ワイプ（色の帯が横切る）</option>
+              <option value="circle">サークル（クリックした所から広がる）</option>
               <option value="none">なし</option>
             </select>
           </label>
@@ -221,7 +223,14 @@
         <div class="design-checks">
           <label class="inline-check"><input id="numbersCheck" type="checkbox" checked />数字をカウントアップし、グラフを伸ばす</label>
           <label class="inline-check"><input id="ambientCheck" type="checkbox" checked />背景の飾りをゆっくり動かす（オーロラ・生成りなど）</label>
+          <label class="inline-check"><input id="drawCheck" type="checkbox" checked />アイコン・線・マーカーを描くように見せる</label>
         </div>
+        <h4 class="dialog-section">モーショングラフィック</h4>
+        <p class="hint mg-note">表紙・章扉・ひと言メッセージ・最後のスライドに効きます。1枚ずつ変えるときは「編集」タブの「動き」で選べます。</p>
+        <div class="mg-label">背景の動き</div>
+        <div id="backdropGrid" class="motion-cards" role="radiogroup" aria-label="背景の動き"></div>
+        <div class="mg-label">大きな文字の動き</div>
+        <div id="kineticGrid" class="motion-cards" role="radiogroup" aria-label="大きな文字の動き"></div>
         <p class="hint">動きは発表モードとHTML出力で再生されます。編集画面では静止しています。「▶ 動きを確認」で今のスライドを試せます。</p>
       </div>
       <div class="dialog-foot">
@@ -231,10 +240,11 @@
     </dialog>
 
     <dialog id="mediaUrlDialog">
-      <div class="dialog-head"><h3>URLで動画・画像を入れる</h3><button class="btn btn-ghost btn-icon" type="button" data-close aria-label="閉じる">✕</button></div>
+      <div class="dialog-head"><h3>URLで動画・画像・アニメーションを入れる</h3><button class="btn btn-ghost btn-icon" type="button" data-close aria-label="閉じる">✕</button></div>
       <div class="dialog-body">
-        <div class="field"><label for="mediaUrlInput">YouTubeのURL、または動画（mp4・webm）・画像のURL</label><input id="mediaUrlInput" type="text" placeholder="https://www.youtube.com/watch?v=…" /></div>
+        <div class="field"><label for="mediaUrlInput">YouTubeのURL、動画（mp4・webm）・画像のURL、またはLottieアニメーション（.json）のURL</label><input id="mediaUrlInput" type="text" placeholder="https://www.youtube.com/watch?v=…" /></div>
         <p class="hint">YouTubeは発表の画面で再生され、インターネットにつながっている必要があります。社外秘の動画は「動画をアップロード」を使ってください（このブラウザの中だけに保存されます）。</p>
+        <p class="hint">LottieFilesのアニメーションは、各アニメーションの「Lottie JSON」のURL（https://lottie.host/…）を貼ると、このブラウザに取り込まれて書き出したファイルでも動きます。</p>
         <div id="mediaUrlStatus" class="status"></div>
       </div>
       <div class="dialog-foot"><button class="btn" type="button" data-close>やめる</button><button id="mediaUrlApply" class="btn btn-primary" type="button">入れる</button></div>
