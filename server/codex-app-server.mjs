@@ -1,0 +1,1030 @@
+import { spawn } from "node:child_process";
+import { EventEmitter } from "node:events";
+import { existsSync, mkdirSync, readFileSync, realpathSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { isAbsolute, join, relative, sep } from "node:path";
+import readline from "node:readline";
+
+import { slideMeaning } from "./visual-relevance.mjs";
+
+const DEFAULT_TIMEOUT_MS = 30_000;
+const ICONS = Object.fromEntries(Object.entries(JSON.parse(readFileSync(new URL("../public/engine/icons.json", import.meta.url), "utf8"))).map(([key, value]) => [key, value.label]));
+
+const TRANSIENT_ERRORS = new Set(["serverOverloaded", "internalServerError", "httpConnectionFailed", "responseStreamConnectionFailed",
+  "responseStreamDisconnected", "responseTooManyFailedAttempts"]);
+
+function errorKind(error) {
+  const info = error?.codexErrorInfo;
+  return typeof info === "string" ? info : info && typeof info === "object" ? Object.keys(info)[0] : "";
+}
+
+/** Codex's error in words the user can act on (the original message kept for support). */
+export function friendlyCodexError(error) {
+  const original = error?.message ?? "";
+  const kind = errorKind(error);
+  const plain = {
+    usageLimitExceeded: "Codexの利用上限に達しました（接続しているChatGPTアカウントのプランの上限）。上限が回復するまで待つか、ChatGPTの利用状況を確認してください。",
+    unauthorized: "Codexとの接続が切れました。画面右上から接続し直してください。",
+    contextWindowExceeded: "素材が長すぎて一度に処理できませんでした。素材を短くするか、分けて作ってください。",
+    sessionBudgetExceeded: "この依頼の処理量が上限を超えました。素材を短くするか、枚数を減らしてください。",
+  }[kind] ?? (TRANSIENT_ERRORS.has(kind) ? "Codex側が混み合っているか、通信が不安定です。少し待ってからもう一度お試しください。" : "");
+  if (!plain) return original || "Codexでエラーが発生しました。";
+  return original ? `${plain}（${original}）` : plain;
+}
+
+function extractItemText(item) {
+  if (!item) return "";
+  if (typeof item.text === "string") return item.text;
+  if (typeof item.content === "string") return item.content;
+  if (Array.isArray(item.content)) {
+    return item.content
+      .map((part) => part?.text ?? part?.content ?? "")
+      .filter(Boolean)
+      .join("\n");
+  }
+  return "";
+}
+
+export function parseDeckResult(text) {
+  const trimmed = String(text ?? "")
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/, "")
+    .trim();
+  return JSON.parse(trimmed);
+}
+
+export function omitNullObjectValues(value) {
+  if (Array.isArray(value)) return value.map(omitNullObjectValues);
+  if (!value || typeof value !== "object") return value;
+
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([, child]) => child !== null)
+      .map(([key, child]) => [key, omitNullObjectValues(child)]),
+  );
+}
+
+export function normalizeCodexOutputSchema(value) {
+  if (Array.isArray(value)) return value.map(normalizeCodexOutputSchema);
+  if (!value || typeof value !== "object") return value;
+
+  const normalized = Object.fromEntries(
+    Object.entries(value).map(([key, child]) => [key, normalizeCodexOutputSchema(child)]),
+  );
+  if (Array.isArray(normalized.items)) {
+    // Codex accepts only an object for array items; it does not support tuple
+    // syntax or prefixItems. Exact validation still runs with Zod afterwards.
+    const tupleItems = normalized.items;
+    const firstItem = tupleItems[0] ?? {};
+    const allItemsMatch = tupleItems.every((item) => JSON.stringify(item) === JSON.stringify(firstItem));
+    normalized.items = allItemsMatch ? firstItem : {};
+    normalized.minItems = Math.max(normalized.minItems ?? 0, tupleItems.length);
+    normalized.maxItems = Math.min(normalized.maxItems ?? Infinity, tupleItems.length);
+    delete normalized.prefixItems;
+  }
+  return normalized;
+}
+
+const DENSITY_GUIDE = {
+  light: { label: "少なめ", rule: "1枚2〜3要素、説明は各15〜30字。大きな結論と余白を優先する" },
+  standard: { label: "標準", rule: "1枚3〜4要素、説明は各25〜40字。結論・根拠・示唆を揃える" },
+  rich: { label: "多め", rule: "1枚4〜5要素、説明は各30〜50字。背景・根拠・具体例・実行条件・リスクまで素材の範囲で掘り下げる" },
+};
+
+const PERSONA = "あなたは経営層向けの資料に強いプレゼンテーション設計者です。資料はHTMLのプレゼンテーションとして画面共有（Zoomなど）で発表され、項目が順に現れる・写真がゆっくり動く・クリックで詳細が開くといった動きを使えます。";
+
+const LAYOUT_GUIDE = [
+  "利用可能なtypeと主要フィールド（すべての本文typeに title と takeaway を入れる）:",
+  "- content: points[]（「要素名：説明」形式の2〜5項目は番号付きの行で見やすく表示される）、twoColumn、columns[[],[]]",
+  "- agenda: items[]（「章名：概要」形式）",
+  "- compare / beforeAfter: leftTitle, rightTitle, leftItems[], rightItems[]（beforeAfterは左右を「観点：内容」の同じ観点・同じ数でそろえると対照表になる）",
+  "- process（横並び2〜5工程） / processList（縦並び最大8工程）: steps[]（「工程名：説明」形式）",
+  "- flowChart: flows[{steps[]}]（1〜2本）",
+  "- timeline: milestones[{label, date, state: done|next|todo}]",
+  "- diagram: lanes[{title, items[]}]（2〜4レーン、各1〜4項目）",
+  "- cycle: items[{label, subLabel}]、centerText",
+  "- cards / headerCards / bulletCards / grid2x2 / headerTwoColumn / headerThreeSummary(summary付き) / stepUp / triangle / venn / roadmap / orgChart(root付き) / checklist(items[].done) / matrix(xLabel, yLabel。右上が狙う領域) / swot(強み・弱み・機会・脅威の順): items[{title, desc, icon}]",
+  "- gantt: periods[]（期間ラベル）、items[{title, desc, start(0始まりの期間番号), span(期間数)}]",
+  "- waterfall（合計の内訳・増減の要因）: unit（単位）、items[{label, value（数値。減少はマイナス）, total（合計・起点の棒はtrue）}]（2〜8本。素材にある数値だけ）",
+  "- logicTree（原因分解・論点分解）: root（課題）、branches[{title（10字程度）, items[]（葉。各16字以内・最大3個）, highlight（手を打つ枝だけtrue）}]（2〜4本）",
+  "- table: headers[], rows[][]（最大5列×6行、セルは14字以内）",
+  "- kpi: items[{label, value, change, status: good|bad|neutral}]（最大4個。1個なら数字を大きく、%ならゲージになる）",
+  "- dashboard: items[{label, value, change}] と image{chartType, data}",
+  "- statsCompare: leftTitle, rightTitle, stats[{label, leftValue, rightValue, trend: up|down|neutral}]",
+  "- pyramid / funnel: levels[{title, description}]（3〜5段）",
+  "- quote: text, author ／ faq: items[{q, a}]（最大4問） ／ executiveSummary: conclusion, items[{title, desc}]（2〜3個）, action",
+  "- imageText: points[]、image={chartType: bar|line|donut|multi-line|stacked-bar|100-stacked-bar, data:{title, items[{label, value}] または xAxisLabels + series[{label, values[]}]}}",
+  "- hero（全面写真に大きな一文。章の始まりや印象づけたい場面に。資料全体で1〜2枚まで）: title（一文で言い切る）, takeaway（補足）, visualAsset（写真）",
+  "- statement（大きな一文だけのスライド。問いかけ・決意・転換点に）: title（小見出し）, text（40字以内の一文。**語句** で1か所強調）",
+  "- title: title, subtitle, date ／ section: title, takeaway ／ closing: title, message（次のアクション。2〜3個なら改行で区切ると番号付きの列になる）",
+  "動き（HTML発表のときだけ効く。PowerPointの図形アニメーションとは別物）:",
+  "- animation: 項目の出し方。auto（レイアウトに合わせて自動。通常はこれ・省略可）/ click（クリックのたびに1項目ずつ。工程・計画を話しながら見せる）/ cascade（順番に自動）/ fade（まとめて）/ none",
+  "- photoMotion: 写真の動き。none / zoom（ゆっくり寄る）/ pan（ゆっくり横に流れる）/ float（ふわっと漂う）/ parallax（マウスに合わせて奥行き）。写真のあるスライドだけ",
+  "- details（その項目をクリックすると開く補足カード）: [{target（項目の配列名と0始まりの番号。例: items[0]、steps[2]、milestones[1]、levels[0]、points[1]、branches[0]、leftItems[0]、stats[0]、rows[0]）, title（任意・20字以内）, text（120字以内）}]。スライドの本文は短いまま、話しながら見せたい根拠・具体例・内訳・数値の出所を text に書く（素材にない数値は書かない）。既存の details は頼まれない限りそのまま残す",
+];
+
+const CAPACITY_GUIDE = [
+  "文字数の上限（1920×1080のスライドに大きな文字で収めるための目安。超えると自動で修正を依頼します）:",
+  "- title 24字以内（1行）、takeaway 45字以内、subtitle 40字以内",
+  "- 箇条書き1項目 45字以内・1枚5項目まで",
+  "- カードの desc: 2列なら60字、3列なら40字、4列なら25字以内",
+  "- process の説明: 3工程なら35字、4工程なら25字、5工程なら18字以内",
+  "- faq の a 55字以内、quote の text 90字以内、statement の text 40字以内、closing の message 60字以内",
+  "- 1枚の本文（タイトルとtakeawayを除く）は240字以内、表は320字以内。超えるなら要素を絞るか2枚に分ける（書ききれない補足は details に回す）",
+];
+
+// How professional decks read: the renderer handles the look, the content has to leave it room.
+const WRITING_GUIDE = [
+  "書き方（プロの資料の作法）:",
+  "- takeaway はタイトルの言い換えではなく、そのスライドの結論・示唆を一文で言い切る（例：×「売上の推移」 ○「新商品が伸び、前年比108%に回復した」）",
+  "- title は論点（24字以内・1行）、takeaway は主張の完全な文。takeaway だけを縦に読んで話が通るようにする",
+  "- takeaway の中で最も伝えたい語句（数値・結論）を1か所だけ **語句** で囲む（その語句がアクセント色で強調される。最大2か所）",
+  "- 同じスライドの項目名は長さと文体をそろえる（体言止めならすべて体言止め）。項目は3〜4個を基本にし、6個を超えるなら分ける",
+  "- 数値は単位までそろえ、比較する数値は同じ単位・同じ桁で書く。記号の飾り（★・！・絵文字）は使わない",
+  "- 証拠の型を内容で選ぶ：数字1つが主役→kpi（1項目。%ならゲージ）／指標を複数→kpi・dashboard／項目の大小比較→imageText（bar）／推移→imageText（line）／構成比→imageText（donut）／合計の内訳・増減の要因→waterfall／原因分解→logicTree／現状と目指す姿→beforeAfter／時系列の計画→roadmap・timeline・gantt／繰り返す業務→cycle／声→quote／決意・問い→statement",
+  "- 同じ type を3枚以上続けない。8枚以上の資料では5種類以上の type を使う。アイコン付きカードの羅列で図解の代わりにしない",
+  "- 写真（visualAsset）は表紙・hero・写真が内容を補強するスライドだけ。図解・表・グラフのスライドには付けない",
+];
+
+const VISUAL_GUIDE = [
+  "- visualAsset（内蔵写真）: ai=テクノロジー / aiWorkflow=AIワークフロー / promptDesign=設計・思考 / businessWorkshop=研修・会議 / businessEtiquette=接客・対話 / executiveDecision=経営判断 / storeOperations=店舗・現場 / dataInsight=データ分析 / transformationRoadmap=変革・計画 / customerExperience=顧客体験",
+  `- items[].icon（カード類のアイコン）に使える名前：${Object.entries(ICONS).map(([k, v]) => `${k}=${v}`).join("、")}`,
+  "- 写真・アイコンを選ぶときは、そのスライドの結論と具体的な本文に写る対象が一致するものだけ。資料全体のテーマだけで選ばない。合う素材がなければ追加しない",
+];
+
+export function deckNarrativeLines(deck, selected = []) {
+  const slides = deck.slides ?? deck.slideData ?? [];
+  const targets = new Set(selected);
+  return slides.map((slide, index) => {
+    const claim = slide.takeaway || slide.conclusion || slide.message || slide.text || slide.title || "";
+    const body = slideMeaning(slide).replace(claim, "").trim();
+    const role = index === 0 ? "導入" : index === slides.length - 1 ? "結論・依頼" : "論点";
+    const detail = targets.has(index) || targets.has(index - 1) || targets.has(index + 1) ? body.slice(0, 260) : body.slice(0, 100);
+    return `${index + 1}枚目 [${role}/${slide.type}] ${claim}${detail ? `｜根拠・内容: ${detail}` : ""}`;
+  });
+}
+
+/** For a deck shown outside the company, a reminder of what must not leak or confuse. */
+function audienceLines(audience) {
+  return /社外|取引先|お客様|顧客|パートナー|外部/.test(String(audience ?? ""))
+    ? ["- 社外向けの資料なので、社内の略語・部署内の呼び名・社外秘の数値や計画は使わず、相手にとっての価値・メリットから書く"]
+    : [];
+}
+
+/** The deck's standing instructions, repeated in every AI request. */
+function memoLines(deck) {
+  const memo = String(deck?.memo ?? "").trim();
+  return memo ? ["", "この資料の前提条件（必ず守る）:", memo, ""] : [];
+}
+
+const THEME_LINE = "テーマ（見た目）: clarity=クリア（白地に深い青） / midnight=ミッドナイト（濃紺の舞台） / editorial=エディトリアル（明朝と朱） / mono=モノ（黒い罫線と赤） / forest=フォレスト（緑と黄土） / sunset=サンセット（コーラルと琥珀） / aurora=オーロラ（漂う光とガラス） / kinari=生成り（和の落ち着き）。切り替え: none / fade / slide / zoom / morph（見出しがつながって動く）";
+
+export function buildChatPrompt({ deck, message, history = [], current = 0, focus = [], attachment = null }) {
+  const slides = withoutImageData(deck.slides ?? []);
+  const total = slides.length;
+  const talk = history.slice(-10).map((turn) => `${turn.role === "user" ? "ユーザー" : "あなた"}: ${String(turn.text).slice(0, 1500)}`);
+  const targets = [...new Set(focus)].filter((index) => index < total).map((index) => index + 1);
+  return [
+    `${PERSONA}ユーザーと会話しながら、資料を少しずつ良くしていきます。`,
+    "最終回答は指定されたJSONスキーマに一致するJSONだけを返してください。Web検索、ファイル操作、外部ツールは不要です。",
+    "",
+    "回答のルール:",
+    "- reply: 日本語で2〜4文。何をどう変えたかを具体的に書く（例：「3枚目のカードを3つに絞り、各項目にクリックで開く補足を付けました」）。質問・相談には答えだけを書く。変えなかった理由や確認したいことがあれば1つだけ聞いてよい",
+    "- operations: 資料を変える必要があるときだけ入れる。質問・感想・相談なら空配列",
+    "  - replace: slide=元の枚数（1始まり）、content=そのスライドの完全なJSON（一部だけでなく全フィールド）",
+    "  - insert: slide=元の何枚目の後ろに入れるか（1始まり）、content=新しいスライドの完全なJSON",
+    "  - delete: slide=元の枚数",
+    "  - 枚数は常に「今の資料」の番号で書く（他の操作で番号がずれることは考えなくてよい）",
+    "- order: スライドの順番を入れ替えるときだけ、元の枚数を新しい順に並べた配列（削除したものは除く）。入れ替えないなら省略",
+    "- deckTitle: 資料名の変更を頼まれたときだけ",
+    "- theme / transition: 見た目のテーマやスライドの切り替えの変更を頼まれたときだけ（下の一覧から選ぶ）",
+    "- suggestions: ユーザーが次に頼みそうな改善を最大3つ。20字以内の依頼文（例：「結論を1枚目に寄せて」「工程をクリックで1つずつ出して」）",
+    "- 頼まれていないスライドは変えない。直すときは必要最小限にする",
+    "- 変更前に、資料の目的→各スライドの役割→対象スライドの主張と根拠→前後とのつながりを確認する。本文を読まずに見出しだけで判断しない",
+    "- 指示が曖昧でも、現在のスライドと直近の会話から対象を特定する。明確な対象がない場合は勝手に広げず、質問する",
+    "- 「動きをつけて」「クリックで詳しく」「写真を動かして」などは animation・details・photoMotion で応える。動画はユーザーが画面の「写真・動画」から追加するもので、あなたは入れられない",
+    "- 写真は、ユーザーが明示的に求めたときだけ新規選択・変更する。見た目を良くする依頼でも、無関係な素材を足さずレイアウト・余白・情報の強弱を優先する",
+    "- 1枚目は title、最後は closing のままにする。表紙と最後は削除・移動しない",
+    "- 入力にない数値や事実は作らない。既存の数値は変えない。「[画像あり]」「[写真・動画あり]」の値はそのまま残す",
+    "- 新しい画像は生成できない。既存の写真を選ぶことと画像生成を混同せず、生成したと説明しない",
+    "- 本文スライドには結論を一文で言い切る takeaway を入れる。文字数の上限を守る",
+    ...memoLines(deck),
+    `資料: ${deck.title ?? ""}（対象者: ${deck.audience || "未指定"}、目的: ${deck.purpose || "未指定"}、全${total}枚、テーマ: ${deck.theme || "clarity"}、切り替え: ${deck.transition || "fade"}）`,
+    `ユーザーが今見ているスライド: ${current + 1}枚目${targets.length ? `／ユーザーが指定したスライド: ${targets.map((n) => `${n}枚目`).join("、")}` : ""}`,
+    "「この1枚」「このスライド」は今見ているスライドを指す。",
+    "資料全体の骨子（各枚の役割・主張・根拠。対象の前後は詳しく示す）:",
+    ...deckNarrativeLines(deck, targets.length ? targets.map((n) => n - 1) : [current]),
+    "",
+    talk.length ? "これまでの会話:" : "",
+    ...talk,
+    "",
+    `ユーザーの新しい依頼: ${message}`,
+    attachment?.text ? `\nユーザーが添付した資料「${attachment.name || "添付"}」の内容（依頼に必要な部分だけを使う。数値はこの資料のものを正とする）:\n${attachment.text}` : "",
+    "",
+    "今の資料（スライドごとのJSON）:",
+    ...slides.map((slide, index) => `${index + 1}枚目: ${JSON.stringify(slide)}`),
+    "",
+    ...LAYOUT_GUIDE,
+    ...VISUAL_GUIDE,
+    THEME_LINE,
+    "",
+    ...CAPACITY_GUIDE,
+    ...WRITING_GUIDE,
+  ].filter((line) => line !== "").join("\n");
+}
+
+/** Slides that have fully arrived in a streamed JSON answer ("slideData": [{…}, {…}, …). */
+export function partialItems(text, key = "slideData") {
+  const start = text.indexOf(`"${key}"`);
+  if (start < 0) return [];
+  let i = text.indexOf("[", start);
+  if (i < 0) return [];
+  const items = [];
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  let objectStart = -1;
+  for (i += 1; i < text.length; i += 1) {
+    const c = text[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (c === "\\") escaped = true;
+      else if (c === '"') inString = false;
+      continue;
+    }
+    if (c === '"') inString = true;
+    else if (c === "{") { if (depth === 0) objectStart = i; depth += 1; }
+    else if (c === "}") {
+      depth -= 1;
+      if (depth === 0 && objectStart >= 0) {
+        try { items.push(JSON.parse(text.slice(objectStart, i + 1))); } catch { /* not complete yet */ }
+        objectStart = -1;
+      }
+    } else if (c === "]" && depth === 0) break;
+  }
+  return items;
+}
+
+/** The part of a JSON string value written so far ("reply": "…), for showing the answer while it streams. */
+export function partialString(text, key) {
+  const match = new RegExp(`"${key}"\\s*:\\s*"`).exec(text);
+  if (!match) return "";
+  let out = "";
+  for (let i = match.index + match[0].length; i < text.length; i += 1) {
+    const c = text[i];
+    if (c === '"') break;
+    if (c !== "\\") { out += c; continue; }
+    const next = text[i + 1];
+    if (next === undefined) break;
+    if (next === "u") {
+      const hex = text.slice(i + 2, i + 6);
+      if (hex.length < 4) break;
+      out += String.fromCharCode(parseInt(hex, 16));
+      i += 5;
+      continue;
+    }
+    out += { n: "\n", t: "\t", r: "", b: "", f: "" }[next] ?? next;
+    i += 1;
+  }
+  return out;
+}
+
+function outlineLines(outline) {
+  if (!outline?.length) return [];
+  return [
+    "",
+    "確定した構成（枚数・順番・各スライドのtype・主旨を必ず守る。内容は素材から肉付けする）:",
+    ...outline.map((item, index) => `${index + 1}. [${item.type}] ${item.title}${item.takeaway ? ` — ${item.takeaway}` : ""}${item.content ? `（内容: ${item.content}）` : ""}`),
+  ];
+}
+
+export function buildOutlinePrompt({ brief, audience, purpose, tone, settings = {}, outline, instruction }) {
+  const revising = Boolean(outline?.length);
+  return [
+    PERSONA,
+    revising
+      ? "次の資料構成（骨子）を、ユーザーの指示に沿って直してください。指示に関係しない部分は変えないでください。"
+      : "本番のスライドを作る前に、資料の骨子（各スライドのtype・タイトル・結論・中身のメモ）を提案してください。",
+    "最終回答は指定されたJSONスキーマに一致するJSONだけを返してください。Web検索や外部ツールは不要です。入力素材にない数値や事実は作らないでください。",
+    "",
+    `対象者: ${audience || "未指定"} ／ 目的: ${purpose || "未指定"} ／ トーン: ${tone || "標準ビジネス"}`,
+    `枚数の目安: ${settings.slideCount ?? 8}枚（内容に合わせて前後2枚まで調整してよい。表紙と最後を含む）`,
+    "",
+    "骨子のルール:",
+    "- slides[0] は type=title、最後は type=closing",
+    "- 2枚目以降で結論を先に示す。各スライドは1メッセージに絞り、同じtypeを連続させない",
+    "- title は24字以内、takeaway はそのスライドの結論を45字以内で言い切る、content はそのスライドに載せる中身のメモ（80字以内、素材の数値をそのまま使う）",
+    "- type は内容に合う専門レイアウトを選ぶ（工程はprocess、対比はcompare・beforeAfter、定量はkpi・imageText（グラフ）・dashboard、計画はroadmap・gantt・timeline、構造はdiagram・cards、内訳・増減はwaterfall、原因分解はlogicTree、印象づけたい一文はstatement・hero など）",
+    "- reply: 骨子の狙いを1〜2文で説明する（修正時は何を変えたか）",
+    ...audienceLines(audience),
+    ...(revising ? ["", `ユーザーの指示: ${instruction || "より良くする"}`, "", "現在の骨子:", ...outline.map((item, index) => `${index + 1}. [${item.type}] ${item.title} — ${item.takeaway ?? ""}（${item.content ?? ""}）`)] : []),
+    "",
+    `素材・依頼内容:\n${brief}`,
+  ].join("\n");
+}
+
+export function buildDeckPrompt(input) {
+  const settings = input.settings ?? {};
+  const density = DENSITY_GUIDE[settings.textDensity] || DENSITY_GUIDE.rich;
+  return [
+    `${PERSONA}入力内容からスライドの構成JSONを作成してください。`,
+    "最終回答は指定されたJSONスキーマに一致するJSONだけを返してください。Markdownや説明文は不要です。",
+    "Web検索、ファイル操作、外部ツールは不要です。入力素材にない数値や事実を作らないでください。",
+    "",
+    `資料タイトル候補: ${input.deckTitle || "入力内容から決定"}`,
+    `対象者: ${input.audience || "未指定"}`,
+    `目的: ${input.purpose || "未指定"}`,
+    `トーン: ${input.tone || "標準ビジネス"}`,
+    `指定枚数: ${settings.slideCount}枚（slideDataを必ずこの枚数にする）`,
+    `文字量: ${density.label}（${density.rule}）`,
+    "",
+    "構成ルール:",
+    "- 1枚目はtitle、最後はclosingにする",
+    "- 2枚目以降で結論を先に示す（6枚以上ならexecutiveSummaryかkpiを序盤に置く）。各スライドは1メッセージに絞る",
+    "- 本文スライドには、そのスライドの結論を一文で言い切る takeaway を必ず入れる。見出しだけで終わらせず、各要素に理由・意味・具体像を含める",
+    "- 同じtypeを連続させず、内容に合う専門レイアウトを使う。工程はprocess、構造はdiagram、対比はcompare、定量はkpi/statsCompare/グラフ、内訳・増減はwaterfall、原因分解はlogicTree、計画はroadmap/gantt/timeline",
+    "- 素材に比較可能な数値が2点以上あれば、最低1枚をimageTextのimage（グラフ）で可視化する。数値がない場合は捏造せず図解で構造を見せる",
+    "- 10枚以上の資料では、章の区切りに section、印象づけたい一文に statement か hero を1枚使ってよい（hero には内容に合う visualAsset を付け、photoMotion は zoom）",
+    "- 長い内容は削らず、table、compare、twoColumn、section区切りなど適切な構造へ分ける",
+    "- 研修・勉強会資料では、理解から実行へ進む物語（背景→要点→比較→手順→注意点→次アクション）を優先する",
+    "- 素材にスライドへ載せきれない補足（根拠・具体例・内訳・数値の出所）があるときは、その項目の details に書く（資料全体で3〜6か所まで。本文はそのぶん短くする）",
+    "- animation は基本的に省略（auto）。発表者が話しながら1つずつ見せたい工程・計画・原因分解だけ click を指定してよい",
+    "- 最後のclosingには、誰が・いつまでに・何をするかが分かる具体的な次のアクションを入れる",
+    "- 各スライドに、発表者が読み上げられる自然な notes（2〜4文）を付ける",
+    ...audienceLines(input.audience),
+    ...outlineLines(input.outline),
+    "",
+    ...LAYOUT_GUIDE,
+    ...VISUAL_GUIDE,
+    "",
+    ...CAPACITY_GUIDE,
+    "",
+    ...WRITING_GUIDE,
+    "",
+    `素材・依頼内容:\n${input.brief}`,
+  ].join("\n");
+}
+
+/** Replace embedded images and videos with a marker: the AI never needs the pixels, and they are huge. */
+export function withoutImageData(value, key = "") {
+  if (key === "media" && value && typeof value === "object") return "[写真・動画あり]";
+  if (typeof value === "string") return value.startsWith("data:") ? "[画像あり]" : value;
+  if (Array.isArray(value)) return value.map((item) => withoutImageData(item));
+  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).filter(([childKey]) => childKey !== "imagePlacement").map(([childKey, child]) => [childKey, withoutImageData(child, childKey)]));
+  return value;
+}
+
+export function buildRevisePrompt({ deck, slideIndex, instruction, issues = [], mode = "replace" }) {
+  const slides = withoutImageData(deck.slides ?? deck.slideData ?? []);
+  const inserting = mode === "insert";
+  const target = slides[slideIndex];
+  const context = deckNarrativeLines({ ...deck, slides }, [slideIndex]);
+  return [
+    PERSONA,
+    inserting
+      ? `資料「${deck.title ?? deck.deckTitle ?? ""}」（対象者: ${deck.audience || "未指定"}、目的: ${deck.purpose || "未指定"}）の${slideIndex}枚目と${slideIndex + 1}枚目の間に入れる、新しいスライドを1枚作ってください。typeはtitleとclosing以外から内容に合うものを選んでください。`
+      : `資料「${deck.title ?? deck.deckTitle ?? ""}」（対象者: ${deck.audience || "未指定"}、目的: ${deck.purpose || "未指定"}）のうち、${slideIndex + 1}枚目のスライドだけを作り直してください。`,
+    "最終回答は指定されたJSONスキーマに一致する1枚分のスライドJSONだけを返してください。入力にない数値や事実は作らないでください。",
+    "資料全体の結論と対象スライドの役割・前後の根拠を踏まえ、指示に関係しない内容・画像を変えない。写真は明示的に頼まれたときだけ変更し、本文に合わない素材を足さない。",
+    ...memoLines(deck),
+    !inserting && slideIndex === 0 ? "このスライドは表紙なので type は title のままにする。" : "",
+    !inserting && slideIndex === slides.length - 1 ? "このスライドは最後なので type は closing のままにする。" : "",
+    "",
+    `${inserting ? "新しいスライドの内容" : "修正の指示"}: ${instruction || (inserting ? "前後の流れを補う内容" : "内容を保ったまま、より伝わりやすく改善する")}`,
+    issues.length ? `画面で検出した問題（必ず解消する）:\n${issues.map((issue) => `- ${issue.field}: ${issue.message}`).join("\n")}` : "",
+    "",
+    "デッキ全体の流れ（前後との重複を避け、一貫性を保つ）:",
+    ...context,
+    "",
+    inserting ? "" : "現在のスライドJSON:",
+    inserting ? "" : JSON.stringify(target),
+    "",
+    ...LAYOUT_GUIDE,
+    ...VISUAL_GUIDE,
+    "",
+    ...CAPACITY_GUIDE,
+    ...WRITING_GUIDE,
+  ].filter((line) => line !== "").join("\n");
+}
+
+export function buildVariantsPrompt({ deck, slideIndex, instruction = "" }) {
+  const slides = withoutImageData(deck.slides ?? []);
+  const total = slides.length;
+  const context = deckNarrativeLines({ ...deck, slides }, [slideIndex]);
+  return [
+    PERSONA,
+    `資料「${deck.title ?? ""}」（対象者: ${deck.audience || "未指定"}、目的: ${deck.purpose || "未指定"}）の${slideIndex + 1}枚目について、見せ方の違う案を3つ作ってください。`,
+    "最終回答は指定されたJSONスキーマに一致するJSONだけを返してください。入力にない数値や事実は作らないでください。",
+    ...memoLines(deck),
+    "- 3案は、レイアウト（type）か切り口がはっきり違うものにする（例：図解で見せる案／数字を大きく見せる案／一文で言い切る案）",
+    "- label はその案の特徴を12字以内で（例：「数字を大きく」「3ステップの図解」）",
+    slideIndex === 0 ? "- 表紙なので type は title のまま、言い回しで変化をつける" : "",
+    slideIndex === total - 1 ? "- 最後のスライドなので type は closing のまま、言い回しで変化をつける" : "",
+    instruction ? `- ユーザーの希望: ${instruction}` : "",
+    "- 「[画像あり]」「[写真・動画あり]」の値はそのまま残す",
+    "- 見せ方の違いは主張の強弱・レイアウト・根拠の整理で作る。写真を新たに付けるのは明示的な依頼があり、本文と直接一致する場合だけ",
+    "",
+    "デッキ全体の流れ:",
+    ...context,
+    "",
+    "現在のスライドJSON:",
+    JSON.stringify(slides[slideIndex]),
+    "",
+    ...LAYOUT_GUIDE,
+    ...VISUAL_GUIDE,
+    "",
+    ...CAPACITY_GUIDE,
+    ...WRITING_GUIDE,
+  ].filter((line) => line !== "").join("\n");
+}
+
+export function buildRewritePrompt({ deck, instruction, settings = {} }) {
+  const slides = withoutImageData(deck.slides ?? deck.slideData ?? []);
+  const countRule = settings.minCount
+    ? `枚数: ${settings.minCount}〜${settings.maxCount}枚の範囲で、内容に合う枚数にする（現在${slides.length}枚）。1枚目はtitle、最後はclosing。`
+    : `枚数: ${settings.slideCount ?? slides.length}枚（slideDataを必ずこの枚数にする）。1枚目はtitle、最後はclosingのまま。`;
+  const density = DENSITY_GUIDE[settings.textDensity] || DENSITY_GUIDE.standard;
+  return [
+    `${PERSONA}次の資料全体を、指示に沿って見直してください。`,
+    "最終回答は指定されたJSONスキーマに一致するJSONだけを返してください。入力にない数値や事実は作らないでください（既存の数値は変えない）。",
+    "",
+    ...memoLines(deck),
+    `見直しの指示: ${instruction}`,
+    countRule,
+    "「[画像あり]」「[写真・動画あり]」と書かれた値は写真・動画なので、そのまま残す（別の文字に書き換えない）。",
+    `文字量: ${density.label}（${density.rule}）`,
+    `対象者: ${deck.audience || "未指定"} ／ 目的: ${deck.purpose || "未指定"}`,
+    "各本文スライドの takeaway と notes を保つか改善する。指示に関係しない良い部分は無理に変えない。details・animation・photoMotion は指示がなければ残す。",
+    "資料の主張と前後の流れを先に読み、修正後も根拠から結論へのつながりを保つ。写真は見た目の穴埋めに追加せず、個々のスライドの本文と具体的に合うものだけにする。",
+    "",
+    ...LAYOUT_GUIDE,
+    ...VISUAL_GUIDE,
+    "",
+    ...CAPACITY_GUIDE,
+    "",
+    ...WRITING_GUIDE,
+    "",
+    "現在の資料JSON:",
+    JSON.stringify({ deckTitle: deck.title ?? deck.deckTitle, purpose: deck.purpose, audience: deck.audience, slideData: slides }),
+  ].join("\n");
+}
+
+export function buildNotesPrompt({ deck, indices, seconds = 60, tone = "丁寧" }) {
+  const slides = withoutImageData(deck.slides ?? deck.slideData ?? []);
+  const targets = indices?.length ? indices : slides.map((_, index) => index);
+  const chars = Math.round(seconds * 5);
+  return [
+    "あなたは発表する人のためのスピーカーノート（読み上げ原稿）を書く担当です。発表は画面共有で行い、スライドの項目は順に現れ、クリックで補足が開きます。",
+    "最終回答は指定されたJSONスキーマに一致するJSONだけを返してください。",
+    `資料「${deck.title ?? deck.deckTitle ?? ""}」（対象者: ${deck.audience || "未指定"}、目的: ${deck.purpose || "未指定"}）`,
+    ...memoLines(deck),
+    "",
+    "書き方:",
+    `- 1枚あたり約${seconds}秒で話せる長さ（${Math.round(chars * 0.8)}〜${Math.round(chars * 1.2)}字）。${tone}な話し言葉（です・ます調）`,
+    "- 最初にそのスライドの結論（takeaway）を言い、次に根拠・具体例を話し、最後に次のスライドへのつなぎを一言入れる",
+    "- スライドに書いてある数値・事実だけを使う（details の補足も使ってよい）。新しい数値や事実を作らない。箇条書きをそのまま読み上げず、聞き手に語りかける文章にする",
+    "- 表紙はあいさつと本日の目的、クロージングはお願いしたいこと・次のアクションで締める",
+    "",
+    `ノートを書くスライド: ${targets.map((index) => `${index + 1}枚目`).join("、")}（slide には枚数の番号を入れる）`,
+    "",
+    "資料JSON（番号は1から）:",
+    JSON.stringify(slides.map((slide, index) => ({ no: index + 1, ...slide, notes: undefined }))),
+  ].join("\n");
+}
+
+export function buildRepairPrompt({ issues, slides, error }) {
+  if (error) {
+    return [
+      "前回の回答は検証に失敗しました。次の問題を直し、スキーマに一致するJSONだけをもう一度返してください。",
+      `問題: ${error}`,
+    ].join("\n");
+  }
+  const lines = issues.map((issue) => {
+    const slide = slides[issue.slide] ?? {};
+    return `- ${issue.slide + 1}枚目「${slide.title ?? ""}」の ${issue.field}: ${issue.message}`;
+  });
+  return [
+    "確認したところ、次のテキストがスライドに収まらない長さです。",
+    ...lines,
+    "該当箇所だけを意味を保ったまま短く言い換えるか、要素を分割・削減してください（書ききれない補足は details に回してよい）。枚数・順序・他のスライドは変えずに、全体のJSONをもう一度返してください。",
+  ].join("\n");
+}
+
+export class CodexSlideServer extends EventEmitter {
+  /** `fallback` (a LocalModel) answers a job when Codex cannot; it may be null. */
+  constructor({ rootDir, fallback = null }) {
+    super();
+    this.rootDir = rootDir;
+    this.fallback = fallback;
+    this.runtimeDir = process.env.CODEX_RUNTIME_DIR ?? join(rootDir, ".codex-runtime");
+    this.codexHome = process.env.SLIDE_STUDIO_CODEX_HOME ?? join(this.runtimeDir, ".codex");
+    this.workspaceDir = join(this.runtimeDir, "workspace");
+    // `npm start` puts node_modules/.bin on PATH; running `node server.js` directly finds the local copy too.
+    const local = join(rootDir, "node_modules", ".bin", "codex");
+    this.binary = process.env.CODEX_BIN ?? (process.platform !== "win32" && existsSync(local) ? local : "codex");
+    this.closing = false;
+    this.proc = null;
+    this.readyPromise = null;
+    this.nextId = 1;
+    this.pending = new Map();
+    this.jobs = new Map();
+    this.threadJobs = new Map();
+    this.loginSessions = new Map();
+    mkdirSync(this.codexHome, { recursive: true });
+    mkdirSync(this.workspaceDir, { recursive: true });
+  }
+
+  async ensureStarted() {
+    if (this.proc && this.readyPromise) return this.readyPromise;
+
+    this.readyPromise = new Promise((resolve, reject) => {
+      const proc = spawn(this.binary, ["app-server"], {
+        cwd: this.workspaceDir,
+        env: {
+          ...process.env,
+          CODEX_HOME: this.codexHome,
+          HOME: this.runtimeDir,
+        },
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+      this.proc = proc;
+
+      proc.once("error", (error) => {
+        this.proc = null;
+        this.readyPromise = null;
+        reject(error);
+      });
+      proc.once("exit", (code, signal) => {
+        const error = new Error(`Codex App Server stopped (code=${code ?? "null"}, signal=${signal ?? "null"})`);
+        for (const pending of this.pending.values()) pending.reject(error);
+        this.pending.clear();
+        for (const job of this.jobs.values()) {
+          if (!["completed", "failed"].includes(job.status) && job.provider !== "local") this.#fallBack(job, error.message).catch((fallbackError) => this.failJob(job.id, fallbackError));
+        }
+        this.proc = null;
+        this.readyPromise = null;
+        if (!this.closing) this.emit("exit", error);
+      });
+
+      const lines = readline.createInterface({ input: proc.stdout });
+      lines.on("line", (line) => this.#handleLine(line));
+      proc.stderr.on("data", (chunk) => {
+        const message = String(chunk).trim();
+        if (message) console.error("[codex]", message);
+      });
+
+      this.request("initialize", {
+        clientInfo: { name: "html_slide_studio", title: "HTML Slide Studio", version: "1.0.0" },
+        capabilities: { experimentalApi: true },
+      })
+        .then(() => {
+          this.notify("initialized", {});
+          resolve();
+        })
+        .catch(reject);
+    });
+
+    return this.readyPromise;
+  }
+
+  send(message) {
+    if (!this.proc?.stdin?.writable) throw new Error("Codex App Server is not running");
+    this.proc.stdin.write(`${JSON.stringify(message)}\n`);
+  }
+
+  request(method, params = {}, timeoutMs = DEFAULT_TIMEOUT_MS) {
+    const id = this.nextId++;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pending.delete(id);
+        reject(new Error(`${method} timed out`));
+      }, timeoutMs);
+      this.pending.set(id, {
+        resolve: (value) => { clearTimeout(timer); resolve(value); },
+        reject: (error) => { clearTimeout(timer); reject(error); },
+      });
+      try {
+        this.send({ method, id, params });
+      } catch (error) {
+        clearTimeout(timer);
+        this.pending.delete(id);
+        reject(error);
+      }
+    });
+  }
+
+  notify(method, params = {}) {
+    this.send({ method, params });
+  }
+
+  async accountRead() {
+    await this.ensureStarted();
+    return this.request("account/read", { refreshToken: false });
+  }
+
+  async accountLogout() {
+    await this.ensureStarted();
+    return this.request("account/logout", {});
+  }
+
+  async startDeviceLogin(sessionId) {
+    await this.ensureStarted();
+    const result = await this.request("account/login/start", { type: "chatgptDeviceCode" });
+    if (result?.loginId) this.loginSessions.set(result.loginId, sessionId);
+    return result;
+  }
+
+  close() {
+    this.closing = true;
+    if (this.proc && !this.proc.killed) this.proc.kill("SIGTERM");
+  }
+
+  /**
+   * Run a structured-output job that may take several turns in one thread.
+   * `finalize(parsed, attempt)` returns { result, detail } to finish, or
+   * { retry: prompt, detail, fallback? } to ask Codex for a corrected answer.
+   */
+  async runJob(job, { prompt, outputSchema, finalize, maxAttempts = 2, effort = "medium", codex = job.useCodex !== false }) {
+    job.plan = { outputSchema, finalize, maxAttempts, effort };
+    job.attempt = 1;
+    job.initialPrompt = prompt;
+    job.provider = "codex";
+    this.jobs.set(job.id, job);
+    // Not connected to Codex: go straight to the stand-by AI (the caller checked it is there).
+    if (!codex) return this.#fallBack(job, "Codexに接続していません。");
+    try {
+      await this.ensureStarted();
+      this.#updateJob(job, { status: "starting", stage: "Codexを起動", detail: "専用のスレッドを準備しています。" });
+      const threadResult = await this.request("thread/start", { cwd: this.workspaceDir });
+      const threadId = threadResult?.thread?.id;
+      if (!threadId) throw new Error("Codex did not return a thread id");
+      job.threadId = threadId;
+      this.threadJobs.set(threadId, job.id);
+      await this.#startTurn(job, prompt);
+    } catch (error) {
+      await this.#fallBack(job, error instanceof Error ? error.message : String(error));
+    }
+    return job;
+  }
+
+  /** Image generation is a tool turn, not structured JSON. Never substitute a text-only local model. */
+  async runImageJob(job, prompt, { referenceImage = null } = {}) {
+    job.plan = { outputSchema: undefined, effort: "medium" };
+    job.attempt = 1;
+    job.provider = "codex";
+    this.jobs.set(job.id, job);
+    if (!job.useCodex) return this.failJob(job.id, new Error("画像生成にはCodexへの接続が必要です。"));
+    try {
+      if (referenceImage?.bytes?.length > 100 && referenceImage.bytes.length < 5_000_000) {
+        job.referencePath = join(this.workspaceDir, `reference-${job.id}.${referenceImage.extension}`);
+        writeFileSync(job.referencePath, referenceImage.bytes, { mode: 0o600 });
+      }
+      await this.ensureStarted();
+      this.#updateJob(job, { status: "starting", stage: "画像生成を準備", detail: "Codexの画像生成ツールを起動しています。" });
+      const thread = await this.request("thread/start", { cwd: this.workspaceDir });
+      job.threadId = thread?.thread?.id;
+      if (!job.threadId) throw new Error("Codex did not return a thread id");
+      this.threadJobs.set(job.threadId, job.id);
+      await this.#startTurn(job, prompt);
+    } catch (error) { this.failJob(job.id, error); }
+    return job;
+  }
+
+  getImage(jobId) {
+    const job = this.jobs.get(jobId);
+    return job?.kind === "image" && job.status === "completed" ? job.imageBytes ?? null : null;
+  }
+
+  /**
+   * Codex could not do the job: hand it to the stand-by AI (Gemma) from the first request, or fail with
+   * the reason when there is none (the web deployment, Ollama not running).
+   */
+  async #fallBack(job, reason) {
+    if (job.provider === "local" || ["completed", "failed"].includes(job.status)) return;
+    if (job.kind === "image") return this.failJob(job.id, new Error(`画像を生成できませんでした：${reason}`));
+    const local = this.fallback ? await this.fallback.status() : null;
+    if (!local?.available) {
+      const note = local && !local.web ? `（予備AI：${local.reason}）` : "";
+      this.#updateJob(job, { status: "failed", stage: "生成失敗", detail: `${reason}${note}`, error: `${reason}${note}` });
+      return;
+    }
+    job.provider = "local";
+    job.codexProblem = reason;
+    job.attempt = 1;
+    job.lastGood = null;
+    job.localModel = local.model;
+    job.localMessages = [{ role: "user", content: job.initialPrompt }];
+    await this.#localTurn(job);
+  }
+
+  async #localTurn(job) {
+    const label = `予備AI（${job.localModel}）`;
+    this.#updateJob(job, {
+      status: "running",
+      stage: job.attempt > 1 ? "自動修正中" : `${label}で作成中`,
+      detail: job.attempt > 1 ? `${label}に問題を直してもらっています。` : `Codexが使えないため、${label}で作っています（Codexより時間がかかります）。`,
+    });
+    let text;
+    try {
+      text = await this.fallback.chat(job.localMessages, job.plan.outputSchema, (streamed) => {
+        if (Date.now() - (job.lastProgressAt ?? 0) < 700) return;
+        job.lastProgressAt = Date.now();
+        const partial = job.kind === "deck" && job.attempt === 1 ? partialItems(streamed) : null;
+        const reply = job.kind === "chat" && job.attempt === 1 ? partialString(streamed, "reply") : "";
+        const detail = partial?.length ? `${partial.length}枚目まで書き上がりました（${label}）。` : reply ? "返事を書いています。" : `${streamed.length.toLocaleString("ja-JP")}文字を受信しました（${label}）。`;
+        this.#updateJob(job, { detail, progress: streamed.length, ...(partial ? { partial } : {}), ...(reply ? { partialReply: reply } : {}) });
+      });
+    } catch (error) {
+      const message = `Codexが使えず（${job.codexProblem}）、予備AIでも作れませんでした：${error instanceof Error ? error.message : String(error)}`;
+      this.#updateJob(job, { status: "failed", stage: "生成失敗", detail: message, error: message });
+      return;
+    }
+    job.localMessages.push({ role: "assistant", content: text });
+    await this.#handleAnswer(job, text, (next) => {
+      job.localMessages.push({ role: "user", content: next });
+      return this.#localTurn(job);
+    });
+  }
+
+  async #startTurn(job, text) {
+    job.messageParts = new Map();
+    job.finalText = null;
+    job.lastPrompt = text;
+    job.turnError = null;
+    const turnResult = await this.request("turn/start", {
+      threadId: job.threadId,
+      input: [{ type: "text", text }, ...(job.kind === "image" && job.referencePath ? [{ type: "localImage", path: job.referencePath }] : [])],
+      cwd: this.workspaceDir,
+      approvalPolicy: "never",
+      sandboxPolicy: { type: "workspaceWrite", writableRoots: [this.workspaceDir], networkAccess: false },
+      effort: job.plan.effort,
+      summary: "concise",
+      ...(job.plan.outputSchema ? { outputSchema: job.plan.outputSchema } : {}),
+    });
+    job.turnId = turnResult?.turn?.id ?? null;
+    const first = { image: ["画像を生成中", "指定された絵柄で新しい画像を描いています。"], chat: ["考えています", "依頼を読んで、資料の該当箇所を確認しています。"], variants: ["別案を考えています", "見せ方の違う案を組み立てています。"], outline: ["骨子を考えています", "話の流れと各スライドの役割を決めています。"], notes: ["原稿を書いています", "スライドごとの話す内容を組み立てています。"] }[job.kind] ?? ["構成を生成", "Codexが流れとレイアウトを設計しています。"];
+    this.#updateJob(job, {
+      status: "running",
+      stage: job.attempt > 1 ? "自動修正中" : first[0],
+      detail: job.attempt > 1 ? "検出した問題をCodexに直してもらっています。" : first[1],
+    });
+  }
+
+  getJob(jobId) {
+    const job = this.jobs.get(jobId);
+    return job ? this.#publicJob(job) : null;
+  }
+
+  failJob(jobId, error) {
+    const job = this.jobs.get(jobId);
+    if (!job) return;
+    const message = error instanceof Error ? error.message : String(error);
+    this.#updateJob(job, { status: "failed", stage: "エラー", detail: message, error: message });
+  }
+
+  #handleLine(line) {
+    let message;
+    try {
+      message = JSON.parse(line);
+    } catch {
+      console.error("Invalid Codex message", line.slice(0, 500));
+      return;
+    }
+
+    if (message.id != null && !message.method) {
+      const pending = this.pending.get(message.id);
+      if (!pending) return;
+      this.pending.delete(message.id);
+      if (message.error) pending.reject(new Error(message.error.message ?? JSON.stringify(message.error)));
+      else pending.resolve(message.result);
+      return;
+    }
+
+    if (message.method === "account/login/completed") {
+      const loginId = message.params?.loginId;
+      const sessionId = loginId ? this.loginSessions.get(loginId) : null;
+      if (loginId) this.loginSessions.delete(loginId);
+      this.emit("login", { sessionId, ...message.params });
+      return;
+    }
+
+    if (message.id != null && message.method) {
+      this.#handleServerRequest(message);
+      return;
+    }
+
+    this.#handleNotification(message);
+  }
+
+  #handleServerRequest(message) {
+    const job = this.#jobFor(message.params?.threadId);
+    if (job) {
+      this.#updateJob(job, {
+        status: "failed",
+        stage: "確認が必要",
+        detail: `Codexが追加確認を要求しました: ${message.method}`,
+        error: "条件を具体化して再実行してください。",
+      });
+    }
+    this.send({ id: message.id, result: { decision: "decline", action: "decline", content: null } });
+  }
+
+  #handleNotification(message) {
+    const params = message.params ?? {};
+    const job = this.#jobFor(params.threadId ?? params.turn?.threadId);
+    if (!job || ["completed", "failed"].includes(job.status)) return;
+
+    switch (message.method) {
+      case "item/completed":
+        if (job.kind === "image" && params.item?.type === "imageGeneration") {
+          job.imageItem = params.item;
+          this.#updateJob(job, { stage: "画像を確認中", detail: "生成結果を保存・検証しています。" });
+        }
+        if (params.item?.type === "agentMessage") {
+          const text = extractItemText(params.item);
+          if (text) job.finalText = text;
+        }
+        break;
+      case "item/agentMessage/delta": {
+        const itemId = params.itemId ?? "final";
+        job.messageParts.set(itemId, `${job.messageParts.get(itemId) ?? ""}${params.delta ?? ""}`);
+        const received = [...job.messageParts.values()].reduce((sum, part) => sum + part.length, 0);
+        if (Date.now() - (job.lastProgressAt ?? 0) > 700) {
+          job.lastProgressAt = Date.now();
+          // First drafts stream slide by slide, so the page can show each one as it is written.
+          const streamed = [...job.messageParts.values()].join("");
+          const partial = job.kind === "deck" && job.attempt === 1 ? partialItems(streamed) : null;
+          const reply = job.kind === "chat" && job.attempt === 1 ? partialString(streamed, "reply") : "";
+          const detail = partial?.length ? `${partial.length}枚目まで書き上がりました。` : reply ? "返事を書いています。" : `${received.toLocaleString("ja-JP")}文字を受信しました。`;
+          this.#updateJob(job, { stage: job.attempt > 1 ? "自動修正中" : "構成を書き出し中", detail, progress: received, ...(partial ? { partial } : {}), ...(reply ? { partialReply: reply } : {}) });
+        }
+        break;
+      }
+      case "item/reasoning/summaryTextDelta": {
+        job.thought = `${job.thought ?? ""}${params.delta ?? ""}`.slice(-400);
+        this.#updateJob(job, { stage: job.attempt > 1 ? "自動修正中" : "構成を検討", detail: job.thought.split("\n").filter(Boolean).at(-1)?.slice(-160) || "論点を整理しています。" });
+        break;
+      }
+      case "error":
+        if (params.willRetry) {
+          // Codex retries this itself (a dropped stream, a brief overload): keep waiting for the turn.
+          this.#updateJob(job, { detail: "通信が不安定なため、Codexが再試行しています…" });
+          break;
+        }
+        // The turn ends right after with status "failed"; #completeTurn decides whether to try again.
+        job.turnError = params.error ?? { message: "Codexでエラーが発生しました。" };
+        clearTimeout(job.errorTimer);
+        job.errorTimer = setTimeout(() => {
+          if (!["completed", "failed"].includes(job.status) && job.turnError) this.#failTurn(job, job.turnError);
+        }, 20_000);
+        job.errorTimer.unref?.();
+        break;
+      case "turn/completed":
+        this.#completeTurn(job, params.turn).catch((error) => this.failJob(job.id, error));
+        break;
+      default:
+        break;
+    }
+  }
+
+  /** A turn that failed: once per job, a transient failure (overload, dropped stream) is simply asked again. */
+  #failTurn(job, error, status = "failed") {
+    clearTimeout(job.errorTimer);
+    if (TRANSIENT_ERRORS.has(errorKind(error)) && !job.transientRetried && job.lastPrompt) {
+      job.transientRetried = true;
+      this.#updateJob(job, { stage: "再試行中", detail: "Codex側が混み合っているため、もう一度依頼しています。" });
+      this.#startTurn(job, job.lastPrompt).catch((retryError) => this.failJob(job.id, retryError));
+      return;
+    }
+    const message = error ? friendlyCodexError(error) : `Codexの処理が終わりませんでした（${status}）。もう一度お試しください。`;
+    // Too much material fails on the smaller stand-by model as well; everything else is worth a try.
+    if (errorKind(error) === "contextWindowExceeded") {
+      this.#updateJob(job, { status: "failed", stage: "生成失敗", detail: message, error: message });
+      return;
+    }
+    this.#fallBack(job, message).catch((fallbackError) => this.failJob(job.id, fallbackError));
+  }
+
+  async #completeTurn(job, turn) {
+    clearTimeout(job.errorTimer);
+    if (turn?.status !== "completed") {
+      this.#failTurn(job, turn?.error ?? job.turnError, turn?.status ?? "unknown");
+      return;
+    }
+    if (job.kind === "image") {
+      try {
+        const item = job.imageItem;
+        if (!item || item.status !== "completed" || !item.savedPath) throw new Error("Codexから画像ファイルが返されませんでした。画像生成が利用可能か確認してください。");
+        const path = realpathSync(item.savedPath);
+        const allowed = [this.workspaceDir, this.codexHome].some((root) => {
+          const rel = relative(realpathSync(root), path);
+          return rel && rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
+        });
+        if (!allowed) throw new Error("画像の保存先を検証できませんでした。");
+        const size = statSync(path).size;
+        if (size < 100 || size > 25_000_000) throw new Error("生成画像のサイズが不正です。");
+        const bytes = readFileSync(path);
+        const png = bytes.subarray(0, 8).equals(Buffer.from("89504e470d0a1a0a", "hex"));
+        const jpeg = bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+        const webp = bytes.toString("ascii", 0, 4) === "RIFF" && bytes.toString("ascii", 8, 12) === "WEBP";
+        if (!png && !jpeg && !webp) throw new Error("生成結果が画像ではありません。" );
+        job.imageBytes = bytes;
+        job.imageMime = png ? "image/png" : jpeg ? "image/jpeg" : "image/webp";
+        this.#updateJob(job, { status: "completed", stage: "完了", detail: "新しい画像を生成しました。確認してからスライドに採用できます。", result: { image: { url: `/api/decks/${job.id}/image`, mime: job.imageMime, revisedPrompt: item.revisedPrompt ?? null } } });
+      } catch (error) { this.failJob(job.id, error); }
+      return;
+    }
+    const streamed = [...job.messageParts.values()].join("\n");
+    await this.#handleAnswer(job, job.finalText || streamed, (next) => this.#startTurn(job, next));
+  }
+
+  /** Check an answer (from Codex or the stand-by AI); `next(prompt)` asks the same AI again. */
+  async #handleAnswer(job, text, next) {
+    const canRetry = job.attempt < job.plan.maxAttempts;
+    const who = job.provider === "local" ? `予備AI（${job.localModel}）` : "Codex";
+    let outcome;
+    try {
+      this.#updateJob(job, { stage: "品質チェック", detail: "文字量とスキーマを確認しています。" });
+      outcome = await job.plan.finalize(parseDeckResult(text), job.attempt);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (canRetry) {
+        job.attempt += 1;
+        await next(buildRepairPrompt({ error: message }));
+        return;
+      }
+      if (job.lastGood) {
+        this.#updateJob(job, { status: "completed", stage: "完了", detail: "自動修正に失敗したため、直前の有効な構成を採用しました。", result: job.lastGood });
+        return;
+      }
+      this.#updateJob(job, {
+        status: "failed",
+        stage: "結果解析エラー",
+        detail: `${who}の回答をスライド構成として検証できませんでした。`,
+        error: message,
+        rawOutput: text,
+      });
+      return;
+    }
+    if (outcome.retry && canRetry) {
+      job.attempt += 1;
+      job.lastGood = outcome.fallback ?? job.lastGood;
+      this.#updateJob(job, { stage: "自動修正中", detail: outcome.detail ?? "問題を修正しています。" });
+      await next(outcome.retry);
+      return;
+    }
+    const result = outcome.result ?? outcome.fallback ?? job.lastGood;
+    if (!result) {
+      this.#updateJob(job, { status: "failed", stage: "生成失敗", detail: outcome.detail ?? "結果を確定できませんでした。", error: outcome.detail ?? "結果を確定できませんでした。" });
+      return;
+    }
+    const note = job.provider === "local" ? `（Codexが使えなかったため、${who}で作りました）` : "";
+    this.#updateJob(job, { status: "completed", stage: "完了", detail: `${outcome.detail ?? "完了しました。"}${note}`, result });
+  }
+
+  #jobFor(threadId) {
+    const jobId = threadId ? this.threadJobs.get(threadId) : null;
+    return jobId ? this.jobs.get(jobId) : null;
+  }
+
+  #publicJob(job) {
+    return {
+      id: job.id,
+      kind: job.kind ?? "deck",
+      provider: job.provider ?? "codex",
+      localModel: job.provider === "local" ? job.localModel : null,
+      status: job.status,
+      stage: job.stage,
+      detail: job.detail,
+      attempt: job.attempt ?? 1,
+      progress: job.progress ?? 0,
+      error: job.error ?? null,
+      deck: job.result?.deck ?? null,
+      slide: job.result?.slide ?? null,
+      notes: job.result?.notes ?? null,
+      chat: job.result?.chat ?? null,
+      outline: job.result?.outline ?? null,
+      variants: job.result?.variants ?? null,
+      original: job.result?.original ?? null,
+      image: job.result?.image ?? null,
+      partial: job.status === "completed" ? null : job.partial ?? null,
+      partialReply: job.status === "completed" ? null : job.partialReply ?? null,
+      issues: job.result?.issues ?? [],
+      rawOutput: job.rawOutput ?? null,
+      createdAt: job.createdAt,
+      updatedAt: job.updatedAt,
+    };
+  }
+
+  #updateJob(job, patch) {
+    Object.assign(job, patch, { updatedAt: new Date().toISOString() });
+    this.emit("job", this.#publicJob(job));
+    if (["completed", "failed"].includes(job.status) && !job.cleanupTimer) {
+      if (job.referencePath) { try { unlinkSync(job.referencePath); } catch { /* already removed */ } job.referencePath = null; }
+      job.cleanupTimer = setTimeout(() => {
+        this.jobs.delete(job.id);
+        if (job.threadId) this.threadJobs.delete(job.threadId);
+      }, 60 * 60 * 1000);
+      job.cleanupTimer.unref?.();
+    }
+  }
+}

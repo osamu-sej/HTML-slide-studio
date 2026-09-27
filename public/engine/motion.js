@@ -1,0 +1,560 @@
+/*
+ * HTML Slide Studio — motion runtime and presentation player.
+ * Plays a slide's entrance and builds, counts numbers up, grows charts, lifts items on hover, opens
+ * "click for details" cards, plays video, and drives a full-screen presentation with a presenter view.
+ * Shared by the studio's presenter and exported HTML files (no dependencies).
+ */
+(function (root) {
+  "use strict";
+  const E = root.SlideEngine;
+  if (!E) throw new Error("engine.js must load before motion.js");
+  const { h } = E;
+
+  const reduced = () => typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  // ---------------------------------------------------------------- numbers
+
+  function formatCount(value, decimals, comma) {
+    const fixed = Math.abs(value).toFixed(decimals);
+    if (!comma) return fixed;
+    const [int, frac] = fixed.split(".");
+    return `${Number(int).toLocaleString("en-US")}${frac ? `.${frac}` : ""}`;
+  }
+
+  /** "1,234.5" counts up from 0 in the same format; the final frame is the original text. */
+  function countUp(el, duration = 1100) {
+    const target = el.dataset.count;
+    if (!target || el.dataset.counting) return;
+    const clean = target.replace(/[,\s]/g, "").replace("−", "-").replace(/^[▲+]/, "").replace(/^▼/, "-");
+    const value = parseFloat(clean);
+    if (!Number.isFinite(value) || value === 0) { el.textContent = target; return; }
+    const decimals = (clean.split(".")[1] || "").length;
+    const comma = target.includes(",");
+    const neg = /^[-−▼]/.test(target) ? target[0] : "";
+    const pos = /^[+▲]/.test(target) ? target[0] : "";
+    const start = performance.now();
+    el.dataset.counting = "1";
+    const tick = (now) => {
+      const p = Math.min(1, (now - start) / duration);
+      const eased = 1 - (1 - p) ** 3;
+      el.textContent = p >= 1 ? target : `${value < 0 ? neg || "-" : pos}${formatCount(value * eased, decimals, comma)}`;
+      if (p < 1 && el.isConnected) requestAnimationFrame(tick);
+      else delete el.dataset.counting;
+    };
+    el.textContent = `${pos}${formatCount(0, decimals, comma)}`;
+    requestAnimationFrame(tick);
+  }
+
+  function countWithin(scope, delay = 380) {
+    const slide = scope.closest?.(".hs-slide") || scope;
+    if (!slide.classList.contains("hs-numbers") || reduced()) return;
+    const els = [...scope.querySelectorAll(".hs-count")];
+    if (!els.length) return;
+    for (const el of els) el.textContent = el.dataset.count.replace(/\d/g, "0").replace(/0+(?=[,.]|$)/, "0");
+    setTimeout(() => els.forEach((el) => countUp(el)), delay);
+  }
+
+  // ---------------------------------------------------------------- entrance & builds
+
+  const stepsOf = (slide) => Number(slide.dataset.steps || 0);
+
+  /** Start a slide's entrance. With a click build, `step` groups are already shown (going back shows all). */
+  function play(slide, { step = 0, animate = true } = {}) {
+    slide.classList.remove("hs-play");
+    const click = slide.dataset.build === "click";
+    for (const el of slide.querySelectorAll("[data-g]")) {
+      el.classList.remove("hs-in");
+      el.classList.toggle("hs-hidden", click && Number(el.dataset.g) >= step);
+    }
+    if (!animate || reduced()) return;
+    void slide.offsetWidth;
+    slide.classList.add("hs-play");
+    if (click) {
+      countWithin(slide.querySelector(".hs-head") || slide, 300);
+      for (const el of slide.querySelectorAll("[data-g]")) if (Number(el.dataset.g) < step) countWithin(el, 0);
+    } else countWithin(slide);
+  }
+
+  /** Show the next click step (1-based: step 1 shows group 0). */
+  function reveal(slide, step) {
+    for (const el of slide.querySelectorAll(`[data-g="${step - 1}"]`)) {
+      el.classList.remove("hs-hidden", "hs-in");
+      void el.getBoundingClientRect();
+      if (!reduced()) el.classList.add("hs-in");
+      countWithin(el, 120);
+    }
+  }
+
+  // ---------------------------------------------------------------- media
+
+  function playMedia(slide, { sound = false } = {}) {
+    for (const video of slide.querySelectorAll("video[data-autoplay]")) {
+      video.muted = !sound || video.hasAttribute("data-muted");
+      video.play().catch(() => { video.muted = true; video.play().catch(() => {}); });
+    }
+    for (const frame of slide.querySelectorAll("iframe[data-autoplay]")) {
+      const send = () => frame.contentWindow?.postMessage(JSON.stringify({ event: "command", func: "playVideo", args: [] }), "*");
+      frame.addEventListener("load", send, { once: true });
+      send();
+    }
+  }
+
+  function stopMedia(slide) {
+    for (const video of slide.querySelectorAll("video")) { try { video.pause(); } catch { /* detached */ } }
+    for (const frame of slide.querySelectorAll("iframe")) frame.contentWindow?.postMessage(JSON.stringify({ event: "command", func: "pauseVideo", args: [] }), "*");
+  }
+
+  // ---------------------------------------------------------------- interaction (hover, tooltips, details, parallax)
+
+  function slideScale(slide) {
+    const rect = slide.getBoundingClientRect();
+    return rect.width ? rect.width / E.W : 1;
+  }
+
+  function toSlide(slide, clientX, clientY) {
+    const rect = slide.getBoundingClientRect();
+    const k = slide.getBoundingClientRect().width / E.W || 1;
+    return [(clientX - rect.left) / k, (clientY - rect.top) / k];
+  }
+
+  function rectIn(slide, el) {
+    const base = slide.getBoundingClientRect();
+    const r = el.getBoundingClientRect();
+    const k = base.width / E.W || 1;
+    return { x: (r.left - base.left) / k, y: (r.top - base.top) / k, w: r.width / k, h: r.height / k };
+  }
+
+  /** Wire a presented slide. Returns a function that removes everything again. */
+  function activate(slide, { details = [], onOpen, onClose } = {}) {
+    const overlay = slide.querySelector(".hs-overlay");
+    let hotKey = null;
+    let tip = null;
+    const setHot = (key) => {
+      if (key === hotKey) return;
+      for (const el of slide.querySelectorAll(".hs-hot")) el.classList.remove("hs-hot");
+      slide.querySelectorAll(".hs-has-hot").forEach((el) => el.classList.remove("hs-has-hot"));
+      hotKey = key;
+      if (!key) return;
+      const els = slide.querySelectorAll(`[data-item="${E.cssEscape(key)}"]`);
+      for (const el of els) el.classList.add("hs-hot");
+      els[0]?.closest(".hs-body")?.classList.add("hs-has-hot");
+    };
+    const showTip = (mark, event) => {
+      if (!tip) { tip = h("div", { class: "hs-tip" }); overlay.append(tip); }
+      tip.textContent = mark.dataset.tip;
+      const [x, y] = toSlide(slide, event.clientX, event.clientY);
+      tip.style.left = `${Math.max(120, Math.min(E.W - 120, x))}px`;
+      tip.style.top = `${Math.max(90, y)}px`;
+      mark.closest(".hs-chart, .hs-wf")?.classList.add("hs-has-hot");
+      for (const other of slide.querySelectorAll(".hs-mark.hs-hot")) other.classList.remove("hs-hot");
+      mark.classList.add("hs-hot");
+    };
+    const hideTip = () => {
+      tip?.remove(); tip = null;
+      slide.querySelectorAll(".hs-mark.hs-hot").forEach((el) => el.classList.remove("hs-hot"));
+      slide.querySelectorAll(".hs-chart.hs-has-hot, .hs-wf.hs-has-hot").forEach((el) => el.classList.remove("hs-has-hot"));
+    };
+    const onOver = (event) => {
+      if (event.target.closest?.(".hs-popover")) return;
+      const mark = event.target.closest?.(".hs-mark");
+      if (mark) showTip(mark, event); else hideTip();
+      const itemEl = event.target.closest?.("[data-item]");
+      setHot(itemEl && !itemEl.closest(".hs-popover") ? itemEl.dataset.item : null);
+    };
+    const onMove = (event) => {
+      const mark = event.target.closest?.(".hs-mark");
+      if (mark && tip) showTip(mark, event);
+      const parallax = slide.querySelectorAll('.hs-media[data-motion="parallax"]');
+      if (parallax.length) {
+        const [x, y] = toSlide(slide, event.clientX, event.clientY);
+        for (const media of parallax) {
+          media.style.setProperty("--px", `${((x / E.W) - 0.5) * -3}%`);
+          media.style.setProperty("--py", `${((y / E.H) - 0.5) * -3}%`);
+        }
+      }
+    };
+    const onLeave = () => { setHot(null); hideTip(); };
+    const openDetail = (target) => {
+      const detail = details.find((entry) => entry.target === target);
+      if (!detail) return;
+      closeDetail();
+      const anchor = [...slide.querySelectorAll(`[data-item="${E.cssEscape(target)}"]`)].find((el) => !(el instanceof SVGElement)) || slide.querySelector(`[data-item="${E.cssEscape(target)}"]`);
+      const box = anchor ? rectIn(slide, anchor) : { x: 700, y: 300, w: 200, h: 100 };
+      const width = 760;
+      const scrim = h("div", { class: "hs-scrim", onclick: (event) => { event.stopPropagation(); closeDetail(); } });
+      const pop = h("div", { class: "hs-popover", role: "dialog", "aria-label": E.strip(detail.title || "詳細") },
+        h("button", { class: "hs-popover-close", type: "button", "aria-label": "閉じる", onclick: (event) => { event.stopPropagation(); closeDetail(); } }, "×"),
+        detail.title ? h("div", { class: "hs-popover-title" }, E.strip(detail.title)) : null,
+        h("div", { class: "hs-popover-text" }, E.rich(detail.text)));
+      pop.addEventListener("click", (event) => event.stopPropagation());
+      const right = box.x + box.w + 32;
+      const x = right + width < E.W - 48 ? right : Math.max(48, box.x - width - 32);
+      pop.style.left = `${x}px`;
+      pop.style.top = `${Math.max(72, Math.min(E.H - 420, box.y))}px`;
+      overlay.append(scrim, pop);
+      slide.dataset.detailOpen = target;
+      onOpen?.(detail);
+    };
+    const closeDetail = () => {
+      overlay.querySelectorAll(".hs-popover, .hs-scrim").forEach((el) => el.remove());
+      if (slide.dataset.detailOpen) { delete slide.dataset.detailOpen; onClose?.(); }
+    };
+    const onClick = (event) => {
+      const host = event.target.closest?.("[data-detail]");
+      if (host && !event.target.closest(".hs-popover")) {
+        event.stopPropagation();
+        event.preventDefault();
+        openDetail(host.dataset.detail);
+        return;
+      }
+      const video = event.target.closest?.("video");
+      if (video) {
+        event.stopPropagation();
+        if (video.paused) { video.muted = video.hasAttribute("data-muted"); video.play().catch(() => {}); } else video.pause();
+      }
+      if (event.target.closest?.("iframe, .hs-popover")) event.stopPropagation();
+    };
+    slide.addEventListener("pointerover", onOver);
+    slide.addEventListener("pointermove", onMove);
+    slide.addEventListener("pointerleave", onLeave);
+    slide.addEventListener("click", onClick, true);
+    return {
+      openDetail,
+      closeDetail,
+      get detailOpen() { return Boolean(slide.dataset.detailOpen); },
+      destroy() {
+        closeDetail(); hideTip(); setHot(null);
+        slide.removeEventListener("pointerover", onOver);
+        slide.removeEventListener("pointermove", onMove);
+        slide.removeEventListener("pointerleave", onLeave);
+        slide.removeEventListener("click", onClick, true);
+      },
+    };
+  }
+
+  // ---------------------------------------------------------------- engine stylesheet (for the presenter view window)
+
+  function engineCss() {
+    const out = [];
+    for (const sheet of document.styleSheets) {
+      const node = sheet.ownerNode;
+      if (!node?.hasAttribute?.("data-hs-engine")) continue;
+      try { for (const rule of sheet.cssRules) out.push(rule.cssText); } catch { /* cross-origin sheet */ }
+    }
+    return out.join("\n");
+  }
+
+  // ---------------------------------------------------------------- player
+
+  const TRANSITIONS = new Set(["none", "fade", "slide", "zoom", "morph"]);
+
+  /**
+   * A presentation in `host` (the studio's presenter overlay or an exported file's body).
+   * opts: { deck, start, step, fitFor(i), renderOptions, onChange({index, step}), onClose(), closable, keyboard }
+   */
+  function createPlayer(host, opts) {
+    const deck = opts.deck;
+    const slides = deck.slides || [];
+    const total = slides.length;
+    const transition = TRANSITIONS.has(deck.transition) ? deck.transition : "fade";
+    const doc = host.ownerDocument;
+    const win = doc.defaultView;
+    let index = Math.max(0, Math.min(total - 1, opts.start || 0));
+    let step = 0;
+    let current = null;
+    let interaction = null;
+    let busy = null;
+    let pv = null;
+    let gesture = false;
+    const started = Date.now();
+
+    const stage = h("div", { class: "hs-player-stage" });
+    const progress = h("div", { class: "hs-player-progress" }, h("i"));
+    const counter = h("span", { class: "hs-player-count" });
+    const notes = h("div", { class: "hs-player-notes", hidden: true });
+    const btn = (label, title, fn, cls = "") => h("button", { class: `hs-player-btn ${cls}`, type: "button", title, "aria-label": title, onclick: (event) => { event.stopPropagation(); fn(); } }, label);
+    const bar = h("div", { class: "hs-player-bar" },
+      btn("‹", "前へ（←）", () => prev()),
+      counter,
+      btn("›", "次へ（→・クリック）", () => next()),
+      h("span", { class: "hs-player-spacer" }),
+      btn("一覧", "スライド一覧（G）", () => toggleGrid()),
+      btn("ノート", "ノートを表示（N）", () => toggleNotes()),
+      btn("発表者ビュー", "別ウィンドウにノート・次のスライド・経過時間（P）", () => openPresenterView()),
+      btn("全画面", "全画面（F）", () => toggleFullscreen()),
+      opts.closable === false ? null : btn("終了", "発表を終了（Esc）", () => close(), "end"));
+    const grid = h("div", { class: "hs-player-grid", hidden: true });
+    const black = h("div", { class: "hs-player-black", hidden: true, onclick: (event) => { event.stopPropagation(); black.hidden = true; } });
+    const player = h("div", { class: "hs-player", tabindex: "-1" }, stage, progress, notes, bar, grid, black);
+    host.append(player);
+
+    const renderAt = (i) => {
+      const el = E.render(slides[i], { ...(opts.renderOptions || {}), deck, index: i, mode: "present", fit: opts.fitFor?.(i) });
+      return E.mount(el, { contain: true, className: "hs-player-slide" });
+    };
+
+    function update() {
+      counter.textContent = `${index + 1} / ${total}`;
+      progress.firstChild.style.width = `${((index + 1) / total) * 100}%`;
+      notes.textContent = E.strip(slides[index]?.notes || "") || "（ノートはありません）";
+      opts.onChange?.({ index, step });
+      syncPresenterView();
+    }
+
+    function nameShared(scaler, on) {
+      const slide = scaler?.firstElementChild;
+      if (!slide) return;
+      const pick = (sel, name) => { const el = slide.querySelector(sel); if (el) el.style.viewTransitionName = on ? name : ""; };
+      pick(".hs-title, .hs-cover-title, .hs-section-title, .hs-hero-title", "hs-title");
+      pick(".hs-eyebrow", "hs-eyebrow");
+      pick(".hs-takeaway", "hs-takeaway");
+      pick(".hs-foot", "hs-foot");
+    }
+
+    async function show(i, { dir = 1, fullStep = false } = {}) {
+      if (busy) await busy;
+      const prevScaler = current;
+      const prevSlide = prevScaler?.firstElementChild;
+      if (prevSlide) { interaction?.destroy(); stopMedia(prevSlide); }
+      index = i;
+      const next = renderAt(i);
+      const slide = next.firstElementChild;
+      step = fullStep ? stepsOf(slide) : 0;
+      const type = reduced() || !prevScaler ? "none" : transition;
+      const enter = () => {
+        play(slide, { step, animate: true });
+        interaction = activate(slide, { details: slides[i]?.details || [] });
+        playMedia(slide, { sound: gesture });
+      };
+      if (type === "morph" && doc.startViewTransition) {
+        nameShared(prevScaler, true);
+        const vt = doc.startViewTransition(() => {
+          nameShared(prevScaler, false);
+          prevScaler.remove();
+          stage.append(next);
+          E.scale(next);
+          nameShared(next, true);
+        });
+        current = next;
+        busy = vt.finished.catch(() => {}).then(() => { nameShared(next, false); busy = null; });
+        vt.updateCallbackDone.then(enter, enter);
+      } else if (type === "none" || type === "morph") {
+        prevScaler?.remove();
+        stage.append(next);
+        current = next;
+        E.scale(next);
+        enter();
+        if (type === "morph" && prevScaler) next.classList.add("hs-tr-in-fade");
+      } else {
+        stage.append(next);
+        E.scale(next);
+        current = next;
+        const suffix = dir < 0 ? " rev" : "";
+        next.className += ` hs-tr-in-${type}${suffix}`;
+        prevScaler.className += ` hs-tr-out-${type}${suffix}`;
+        enter();
+        busy = new Promise((resolve) => setTimeout(resolve, 620)).then(() => {
+          prevScaler.remove();
+          next.classList.remove(`hs-tr-in-${type}`, "rev");
+          busy = null;
+        });
+      }
+      update();
+    }
+
+    function next() {
+      if (!black.hidden) { black.hidden = true; return; }
+      if (interaction?.detailOpen) { interaction.closeDetail(); return; }
+      const slide = current?.firstElementChild;
+      if (slide && step < stepsOf(slide)) {
+        step += 1;
+        reveal(slide, step);
+        update();
+        return;
+      }
+      if (index < total - 1) show(index + 1, { dir: 1 });
+    }
+
+    function prev() {
+      if (interaction?.detailOpen) { interaction.closeDetail(); return; }
+      if (index > 0) show(index - 1, { dir: -1, fullStep: true });
+    }
+
+    function go(i) {
+      const target = Math.max(0, Math.min(total - 1, i));
+      if (target !== index) show(target, { dir: target > index ? 1 : -1 });
+    }
+
+    function toggleNotes() { notes.hidden = !notes.hidden; player.classList.toggle("with-notes", !notes.hidden); requestAnimationFrame(() => current && E.scale(current)); }
+
+    function toggleGrid() {
+      if (!grid.hidden) { grid.hidden = true; grid.replaceChildren(); return; }
+      grid.replaceChildren(...slides.map((slide, i) => {
+        const el = E.render(slide, { ...(opts.renderOptions || {}), deck, index: i, mode: "thumb", fit: opts.fitFor?.(i) });
+        return h("button", { class: `hs-grid-cell${i === index ? " is-current" : ""}`, type: "button", onclick: (event) => { event.stopPropagation(); grid.hidden = true; grid.replaceChildren(); go(i); } },
+          E.mount(el), h("span", {}, `${i + 1}. ${E.strip(slide.title || slide.message || "")}`));
+      }));
+      grid.hidden = false;
+    }
+
+    async function toggleFullscreen() {
+      try {
+        if (doc.fullscreenElement) await doc.exitFullscreen();
+        else await (opts.fullscreenTarget || player).requestFullscreen();
+      } catch { /* not allowed here */ }
+    }
+
+    function close() {
+      destroy();
+      opts.onClose?.({ index });
+    }
+
+    // ---- presenter view: notes, the next slide and a clock in a second window (keep the audience window clean)
+    function openPresenterView() {
+      if (pv && !pv.win.closed) { pv.win.focus(); return; }
+      const w = win.open("", "hs-presenter-view", "width=1180,height=760");
+      if (!w) { flash("ポップアップがブロックされました。ブラウザで許可してください"); return; }
+      const fonts = doc.querySelector("link[data-hs-fonts]")?.href || "";
+      w.document.open();
+      w.document.write(`<!doctype html><html lang="ja"><head><meta charset="utf-8"><title>発表者ビュー</title>${fonts ? `<link rel="stylesheet" href="${fonts}">` : ""}<style>${engineCss()}\n${PV_CSS}</style></head><body><div class="pv"><section class="pv-now"></section><aside class="pv-side"><div class="pv-label">次のスライド</div><div class="pv-next"></div><div class="pv-clock"><b class="pv-timer">00:00</b><span class="pv-count"></span></div><div class="pv-btns"><button type="button" data-a="prev">‹ 前へ</button><button type="button" data-a="next">次へ ›</button><button type="button" data-a="reset">時間をリセット</button></div></aside><section class="pv-notes"></section></div></body></html>`);
+      w.document.close();
+      pv = { win: w, start: Date.now() };
+      w.document.addEventListener("keydown", onKey);
+      w.document.addEventListener("click", (event) => {
+        const action = event.target.closest?.("button")?.dataset.a;
+        if (action === "prev") prev();
+        if (action === "next") next();
+        if (action === "reset") pv.start = Date.now();
+      });
+      w.addEventListener("resize", () => layoutPresenterView());
+      pv.timer = setInterval(() => {
+        if (!pv || pv.win.closed) { clearInterval(pv?.timer); pv = null; return; }
+        const sec = Math.floor((Date.now() - pv.start) / 1000);
+        const el = pv.win.document.querySelector(".pv-timer");
+        if (el) el.textContent = `${String(Math.floor(sec / 60)).padStart(2, "0")}:${String(sec % 60).padStart(2, "0")}`;
+      }, 500);
+      syncPresenterView();
+    }
+
+    function layoutPresenterView() {
+      if (!pv || pv.win.closed) return;
+      for (const box of pv.win.document.querySelectorAll(".pv-now, .pv-next")) {
+        const slide = box.querySelector(".hs-slide");
+        if (!slide) continue;
+        const k = Math.min(box.clientWidth / E.W, box.clientHeight / E.H);
+        slide.style.transform = `scale(${k})`;
+        slide.style.left = `${(box.clientWidth - E.W * k) / 2}px`;
+        slide.style.top = `${(box.clientHeight - E.H * k) / 2}px`;
+      }
+    }
+
+    function syncPresenterView() {
+      if (!pv || pv.win.closed) return;
+      const d = pv.win.document;
+      const put = (sel, i, stepShown) => {
+        const box = d.querySelector(sel);
+        if (!box) return;
+        if (i >= total) { box.replaceChildren(d.createTextNode("（最後のスライドです）")); return; }
+        const el = E.render(slides[i], { ...(opts.renderOptions || {}), deck, index: i, mode: "thumb", fit: opts.fitFor?.(i) });
+        if (stepShown != null && el.dataset.build === "click") for (const g of el.querySelectorAll("[data-g]")) g.style.visibility = Number(g.dataset.g) < stepShown ? "" : "hidden";
+        el.style.position = "absolute";
+        el.style.transformOrigin = "0 0";
+        box.replaceChildren(d.adoptNode(el));
+      };
+      put(".pv-now", index, step);
+      put(".pv-next", index + 1, null);
+      d.querySelector(".pv-notes").textContent = E.strip(slides[index]?.notes || "") || "（このスライドにノートはありません）";
+      d.querySelector(".pv-count").textContent = `${index + 1} / ${total}${stepsOf(current?.firstElementChild || d.body) ? `　（${step}/${stepsOf(current.firstElementChild)}）` : ""}`;
+      layoutPresenterView();
+    }
+
+    function flash(text) {
+      const note = h("div", { class: "hs-player-flash" }, text);
+      player.append(note);
+      setTimeout(() => note.remove(), 2600);
+    }
+
+    // ---- input
+    let digits = "";
+    function onKey(event) {
+      if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
+      const key = event.key;
+      gesture = true;
+      if (["ArrowRight", "ArrowDown", "PageDown", " ", "Enter"].includes(key)) {
+        event.preventDefault();
+        if (key === "Enter" && digits) { go(Number(digits) - 1); digits = ""; return; }
+        next();
+      } else if (["ArrowLeft", "ArrowUp", "PageUp", "Backspace"].includes(key)) { event.preventDefault(); prev(); }
+      else if (key === "Home") { event.preventDefault(); go(0); }
+      else if (key === "End") { event.preventDefault(); go(total - 1); }
+      else if (/^[0-9]$/.test(key)) { digits = `${digits}${key}`.slice(-3); }
+      else if (key === "Escape") {
+        if (interaction?.detailOpen) interaction.closeDetail();
+        else if (!grid.hidden) toggleGrid();
+        else if (!black.hidden) black.hidden = true;
+        else if (opts.closable !== false) close();
+      } else if (key === "f" || key === "F") toggleFullscreen();
+      else if (key === "n" || key === "N") toggleNotes();
+      else if (key === "g" || key === "G") toggleGrid();
+      else if (key === "p" || key === "P") openPresenterView();
+      else if (key === "b" || key === "B" || key === ".") { black.style.background = "#000"; black.hidden = !black.hidden; }
+      else if (key === "w" || key === "W") { black.style.background = "#fff"; black.hidden = !black.hidden; }
+    }
+    const onStageClick = (event) => {
+      if (event.target.closest(".hs-player-bar, .hs-player-grid, .hs-player-notes")) return;
+      gesture = true;
+      next();
+    };
+    let touchX = null;
+    const onTouchStart = (event) => { touchX = event.touches[0]?.clientX ?? null; };
+    const onTouchEnd = (event) => {
+      if (touchX == null) return;
+      const dx = (event.changedTouches[0]?.clientX ?? touchX) - touchX;
+      if (Math.abs(dx) > 60) { event.preventDefault(); dx < 0 ? next() : prev(); }
+      touchX = null;
+    };
+    let idle = null;
+    const onMove = () => {
+      player.classList.remove("idle");
+      clearTimeout(idle);
+      idle = setTimeout(() => player.classList.add("idle"), 2600);
+    };
+    if (opts.keyboard !== false) doc.addEventListener("keydown", onKey);
+    stage.addEventListener("click", onStageClick);
+    stage.addEventListener("touchstart", onTouchStart, { passive: true });
+    stage.addEventListener("touchend", onTouchEnd);
+    player.addEventListener("pointermove", onMove);
+    onMove();
+
+    function destroy() {
+      doc.removeEventListener("keydown", onKey);
+      interaction?.destroy();
+      if (current?.firstElementChild) stopMedia(current.firstElementChild);
+      clearTimeout(idle);
+      if (pv?.win && !pv.win.closed) pv.win.close();
+      clearInterval(pv?.timer);
+      player.remove();
+    }
+
+    show(index, { dir: 1, fullStep: Boolean(opts.fullStep) });
+    player.focus({ preventScroll: true });
+
+    return {
+      el: player, next, prev, go, destroy, close, toggleNotes, toggleGrid, toggleFullscreen, openPresenterView,
+      get index() { return index; }, get step() { return step; }, get startedAt() { return started; },
+    };
+  }
+
+  const PV_CSS = `
+html,body{margin:0;height:100%;background:#0d1017;color:#e8ecf4;font-family:"Noto Sans JP","Hiragino Sans",sans-serif}
+.pv{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(280px,1fr);grid-template-rows:minmax(0,1fr) minmax(140px,34%);gap:14px;height:100%;padding:14px;box-sizing:border-box}
+.pv-now,.pv-next{position:relative;overflow:hidden;background:#000;border-radius:10px}
+.pv-now{grid-row:1;grid-column:1}.pv-side{grid-row:1;grid-column:2;display:flex;flex-direction:column;gap:10px;min-height:0}
+.pv-next{flex:0 0 auto;aspect-ratio:16/9;opacity:.9}.pv-label{font-size:12px;letter-spacing:.1em;color:#8b95a8;font-weight:700}
+.pv-clock{display:flex;align-items:baseline;gap:14px;margin-top:6px}.pv-timer{font-size:44px;font-variant-numeric:tabular-nums;font-weight:800}.pv-count{color:#9aa5b8;font-size:15px}
+.pv-btns{display:flex;flex-wrap:wrap;gap:8px;margin-top:auto}.pv-btns button{flex:1;min-width:90px;height:40px;border:1px solid #2c3446;border-radius:10px;background:#161b26;color:#e8ecf4;font:inherit;font-weight:700;cursor:pointer}
+.pv-notes{grid-row:2;grid-column:1/-1;overflow:auto;padding:16px 20px;border-radius:10px;background:#161b26;font-size:22px;line-height:1.75;white-space:pre-wrap}
+.pv .hs-slide{position:absolute;top:0;left:0}`;
+
+  Object.assign(E, { play, reveal, stepsOf, countUp, activate, playMedia, stopMedia, createPlayer, engineCss });
+})(typeof window !== "undefined" ? window : globalThis);
