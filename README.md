@@ -29,7 +29,7 @@ python3 -m venv .venv && .venv/bin/pip install -r tools/requirements.txt
 npm start
 ```
 
-ブラウザで http://localhost:8787 を開き、「Codexに接続」を押してChatGPTアカウントでデバイス認証します（APIキーは不要）。
+ブラウザで http://localhost:8787 を開き、「Codexに接続」を押してChatGPTアカウントでデバイス認証します。表示された認証コードは「コピー」ボタンでコピーできます（APIキーは不要）。
 接続しなくても、雛形・サンプル・JSONの読み込み・編集・発表・書き出しは使えます。
 
 手元で [Ollama](https://ollama.com/) の `gemma4:12b` が動いていれば、Codexが使えないとき（利用上限・接続切れ）に自動で予備AIとして使います。

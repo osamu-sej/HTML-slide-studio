@@ -372,6 +372,23 @@ async function startCodexLogin() {
   }
 }
 
+async function copyDeviceCode() {
+  const code = $("deviceCode").textContent.trim();
+  if (!code) return;
+  try {
+    if (!navigator.clipboard?.writeText) throw new Error("Clipboard API unavailable");
+    await navigator.clipboard.writeText(code);
+    toast("認証コードをコピーしました");
+  } catch {
+    const selection = window.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents($("deviceCode"));
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    toast("コードを選択しました。⌘C または Ctrl+C でコピーしてください");
+  }
+}
+
 // ---------------------------------------------------------------- normalization
 
 const EMPHASIS_KEYS = new Set(["title", "takeaway", "conclusion", "text", "message", "summary", "action"]);
@@ -4117,6 +4134,7 @@ function bind() {
   $("importDeckFile").addEventListener("change", (event) => { importExistingDeck(event.target.files?.[0]); event.target.value = ""; });
   $("importJsonBtn").addEventListener("click", openJsonDialog);
   $("connectCodexBtn").addEventListener("click", startCodexLogin);
+  $("copyDeviceCodeBtn").addEventListener("click", copyDeviceCode);
   $("passcodePanel").addEventListener("submit", submitPasscode);
   $("historyBtn").addEventListener("click", openHistory);
   $("chatTab").addEventListener("click", () => setPanel("chat"));
