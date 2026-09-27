@@ -2,6 +2,20 @@
 
 const IMAGE_MARK = "[画像あり]";
 
+/**
+ * Deep-dive pages (slides with `drillOf`) belong to the nearest story slide above them and are not part of
+ * the story (same rule as storyMap in public/engine/engine.js). Returns the owning slide of each page.
+ */
+export function drillParents(slides) {
+  const parent = {};
+  let last = -1;
+  slides.forEach((slide, i) => {
+    if (slide?.drillOf && last >= 0) parent[i] = last;
+    else last = i;
+  });
+  return parent;
+}
+
 /** The AI never sees image data or user-only fields; carry them over from the slide it replaced. */
 function restoreUserFields(content, original) {
   const slide = { ...content };
@@ -18,6 +32,8 @@ function restoreUserFields(content, original) {
   }
   // Click-for-details text stays unless the AI rewrote it (an empty list removes it).
   if (original?.details?.length && slide.details == null && slide.type === original.type) slide.details = original.details;
+  // A deep-dive page stays one.
+  if (original?.drillOf && slide.drillOf === undefined) slide.drillOf = original.drillOf;
   return slide;
 }
 
@@ -51,20 +67,39 @@ export function applyChatOperations(slides, { operations = [], order } = {}) {
     replaced.set(i, restoreUserFields(op.content, slides[i]));
   }
 
-  // Each original slide travels with the slides inserted after it.
-  let groups = slides.map((slide, i) => ({ from: i, slide: replaced.get(i) ?? slide, inserted: inserts.get(i) ?? [] }));
+  // Each story slide travels with its deep-dive pages and the slides inserted after them: new deep-dive
+  // pages join the slide's own, new story slides come after the whole group, and a deleted slide takes its
+  // deep-dive pages with it.
+  const parentOf = drillParents(slides);
+  const heads = slides.map((_, i) => i).filter((i) => parentOf[i] == null);
+  const headOf = (i) => parentOf[i] ?? i;
+  let groups = heads.map((head) => {
+    const members = slides.map((_, i) => i).filter((i) => i === head || parentOf[i] === head);
+    const inserted = members.flatMap((i) => inserts.get(i) ?? []);
+    return {
+      from: head,
+      drills: members.filter((i) => i !== head),
+      newDrills: inserted.filter((slide) => slide.drillOf),
+      inserted: inserted.filter((slide) => !slide.drillOf),
+    };
+  });
   let moved = false;
   if (order?.length) {
-    const wanted = [...new Set(order.map((no) => no - 1).filter((i) => i >= 0 && i < n))];
+    const wanted = [...new Set(order.map((no) => no - 1).filter((i) => i >= 0 && i < n).map(headOf))];
     const rest = groups.filter((group) => !wanted.includes(group.from));
-    const next = [...wanted.map((i) => groups[i]), ...rest];
-    if (next[0].from !== 0 || next.at(-1).from !== n - 1) throw new Error("order では1枚目（表紙）を先頭、最後のスライドを末尾のままにしてください。");
-    moved = next.some((group, index) => group.from !== index);
+    const next = [...wanted.map((i) => groups.find((group) => group.from === i)), ...rest];
+    if (next[0].from !== 0 || next.at(-1).from !== headOf(n - 1)) throw new Error("order では1枚目（表紙）を先頭、最後のスライドを末尾のままにしてください。");
+    moved = next.some((group, index) => group.from !== groups[index].from);
     groups = next;
   }
   const items = [];
+  const keep = (i) => items.push({ from: i, slide: replaced.get(i) ?? slides[i], changed: replaced.has(i) });
   for (const group of groups) {
-    if (!deleted.has(group.from)) items.push({ from: group.from, slide: group.slide, changed: replaced.has(group.from) });
+    if (!deleted.has(group.from)) {
+      keep(group.from);
+      for (const i of group.drills) if (!deleted.has(i)) keep(i);
+      for (const slide of group.newDrills) items.push({ from: null, slide, changed: true });
+    } else for (const i of group.drills) deleted.add(i);
     for (const slide of group.inserted) items.push({ from: null, slide, changed: true });
   }
   if (items.length < 2 || items.length > 50) throw new Error(`変更後の枚数が${items.length}枚になります。2〜50枚にしてください。`);

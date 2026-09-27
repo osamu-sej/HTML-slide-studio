@@ -200,6 +200,12 @@ input[type="color"] { width: 44px; height: 32px; padding: 2px; border: 1px solid
 .film-item.selected { background: var(--accent-soft); }
 .film-item.selected .hs-scaler { box-shadow: 0 0 0 2px var(--accent); }
 .film-item.dragging { opacity: .4; }
+.film-item.is-drill { margin-left: 16px; }
+.film-item.is-drill .film-no { color: var(--accent); font-size: 13px; }
+.drill-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 6px; align-items: center; margin-bottom: 6px; }
+.drill-row select, .drill-add select { min-width: 0; }
+.drill-add { display: grid; gap: 6px; margin-top: 6px; }
+.drill-add .btns { display: flex; gap: 6px; }
 .film-item.drop-before::before { content: ""; position: absolute; left: 24px; right: 4px; top: -6px; height: 3px; border-radius: 2px; background: var(--accent); }
 .film-no { padding-top: 2px; color: var(--muted); font-size: 11px; font-weight: 700; text-align: right; font-variant-numeric: tabular-nums; }
 .film-item .hs-scaler { border-radius: 4px; box-shadow: 0 0 0 1px var(--line); }

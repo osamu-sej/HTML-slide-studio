@@ -18,9 +18,10 @@ export const LOOKS = {
 
 const LOOK_OF_TYPE = Object.fromEntries(Object.entries(LOOKS).flatMap(([look, { types }]) => types.map((type) => [type, look])));
 
-/** The look of a slide (or an outline row), or null for the cover, the agenda, chapter dividers and the close. */
+/** The look of a slide (or an outline row), or null for the cover, the agenda, chapter dividers, the close and deep-dive pages. */
 export function lookOf(slide) {
   const type = slide?.type;
+  if (slide?.drillOf) return null;
   // A chart with text reads as numbers; a photo with text reads as a photo slide.
   if (type === "imageText" && !(slide.image && typeof slide.image === "object")) {
     const photo = slide.image || slide.customImage || slide.media || (slide.visualAsset && slide.visualAsset !== "none");
@@ -42,7 +43,9 @@ const numbers = (indices) => indices.map((i) => i + 1).join("・");
  * or too few looks overall. Each issue names the slides involved (0-based) and a sentence for people.
  */
 export function varietyIssues(slides) {
-  const body = (slides ?? []).map((slide, index) => ({ index, look: lookOf(slide) })).filter((entry) => entry.look);
+  // Deep-dive pages are not part of the story: the slides on either side of them follow each other.
+  const story = (slides ?? []).map((slide, index) => ({ slide, index })).filter(({ slide, index }) => !(slide?.drillOf && index > 0));
+  const body = story.map(({ slide, index }, pos) => ({ index, pos, look: lookOf(slide) })).filter((entry) => entry.look);
   const issues = [];
   const limit = maxSameLook(body.length);
   const crowded = new Set();
@@ -59,7 +62,7 @@ export function varietyIssues(slides) {
   body.forEach((entry, k) => {
     const previous = body[k - 1];
     if (!previous || previous.look !== entry.look || !LOOKS[entry.look].alike || crowded.has(entry.look)) return;
-    if (entry.index !== previous.index + 1) return;
+    if (entry.pos !== previous.pos + 1) return;
     issues.push({
       kind: "variety", severity: "warning", rule: "adjacent", look: entry.look, slides: [previous.index, entry.index], slide: entry.index, keep: 1,
       message: `${previous.index + 1}枚目と${entry.index + 1}枚目が、どちらも「${LOOKS[entry.look].label}」の見た目で続いています`,

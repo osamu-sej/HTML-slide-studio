@@ -327,7 +327,7 @@
   }
 
   /** Wire a presented slide. Returns a function that removes everything again. */
-  function activate(slide, { details = [], onOpen, onClose } = {}) {
+  function activate(slide, { details = [], onOpen, onClose, onDrill } = {}) {
     const overlay = slide.querySelector(".hs-overlay");
     let hotKey = null;
     let tip = null;
@@ -402,6 +402,13 @@
       if (slide.dataset.detailOpen) { delete slide.dataset.detailOpen; onClose?.(); }
     };
     const onClick = (event) => {
+      const drill = event.target.closest?.("[data-drill]");
+      if (drill && onDrill && !event.target.closest(".hs-popover")) {
+        event.stopPropagation();
+        event.preventDefault();
+        onDrill(Number(drill.dataset.drill), drill);
+        return;
+      }
       const host = event.target.closest?.("[data-detail]");
       if (host && !event.target.closest(".hs-popover")) {
         event.stopPropagation();
@@ -455,16 +462,20 @@
   // ---------------------------------------------------------------- player
 
   const TRANSITIONS = new Set(["none", "fade", "slide", "zoom", "morph", "wipe", "circle"]);
-  const TRANSITION_MS = { wipe: 920, circle: 920 };
+  const TRANSITION_MS = { wipe: 920, circle: 920, drill: 560 };
 
   /**
    * A presentation in `host` (the studio's presenter overlay or an exported file's body).
    * opts: { deck, start, step, fitFor(i), renderOptions, onChange({index, step}), onClose(), closable, keyboard }
+   * The story is the slides without `drillOf`; a deep-dive page opens from its item and returns to where it left.
    */
   function createPlayer(host, opts) {
     const deck = opts.deck;
     const slides = deck.slides || [];
     const total = slides.length;
+    const story = E.storyMap(slides);
+    const order = story.order.length ? story.order : slides.map((_, i) => i);
+    const place = (i) => Math.max(0, order.indexOf(story.parent[i] ?? i));
     const transition = TRANSITIONS.has(deck.transition) ? deck.transition : "fade";
     const doc = host.ownerDocument;
     const win = doc.defaultView;
@@ -476,6 +487,8 @@
     let pv = null;
     let gesture = false;
     let origin = null;
+    // While a deep-dive page is shown: the slide (and build step) to go back to, and where it was opened from.
+    let back = null;
     const started = Date.now();
 
     const stage = h("div", { class: "hs-player-stage" });
@@ -495,7 +508,8 @@
       opts.closable === false ? null : btn("終了", "発表を終了（Esc）", () => close(), "end"));
     const grid = h("div", { class: "hs-player-grid", hidden: true });
     const black = h("div", { class: "hs-player-black", hidden: true, onclick: (event) => { event.stopPropagation(); black.hidden = true; } });
-    const player = h("div", { class: "hs-player", tabindex: "-1" }, stage, progress, notes, bar, grid, black);
+    const backBtn = h("button", { class: "hs-player-back", type: "button", hidden: true, title: "元のスライドへ戻る（Esc・←）", onclick: (event) => { event.stopPropagation(); closeDrill(); } }, "← 元のスライドへ");
+    const player = h("div", { class: "hs-player", tabindex: "-1" }, stage, progress, notes, backBtn, bar, grid, black);
     host.append(player);
 
     const renderAt = (i) => {
@@ -504,8 +518,11 @@
     };
 
     function update() {
-      counter.textContent = `${index + 1} / ${total}`;
-      progress.firstChild.style.width = `${((index + 1) / total) * 100}%`;
+      const pos = place(index);
+      counter.textContent = `${pos + 1} / ${order.length}${back ? " ・ 深掘り" : ""}`;
+      progress.firstChild.style.width = `${((pos + 1) / order.length) * 100}%`;
+      backBtn.hidden = !back;
+      player.classList.toggle("in-drill", Boolean(back));
       notes.textContent = E.strip(slides[index]?.notes || "") || "（ノートはありません）";
       opts.onChange?.({ index, step });
       syncPresenterView();
@@ -521,7 +538,7 @@
       pick(".hs-foot", "hs-foot");
     }
 
-    async function show(i, { dir = 1, fullStep = false } = {}) {
+    async function show(i, { dir = 1, fullStep = false, atStep = null, via = null, at = null } = {}) {
       if (busy) await busy;
       const prevScaler = current;
       const prevSlide = prevScaler?.firstElementChild;
@@ -529,11 +546,14 @@
       index = i;
       const next = renderAt(i);
       const slide = next.firstElementChild;
-      step = fullStep ? stepsOf(slide) : 0;
-      const type = reduced() || !prevScaler ? "none" : transition;
+      step = Math.min(atStep ?? (fullStep ? Infinity : 0), stepsOf(slide));
+      const type = reduced() || !prevScaler ? "none" : via || transition;
+      // A deep-dive page grows out of the item that opened it, and shrinks back into it.
+      if (type === "drill" && at) for (const el of [next, prevScaler]) { el.style.setProperty("--ox", `${at.x}px`); el.style.setProperty("--oy", `${at.y}px`); }
       const enter = () => {
-        play(slide, { step, animate: true });
-        interaction = activate(slide, { details: slides[i]?.details || [] });
+        // Coming back from a deep-dive page, the slide is shown as it was left, without its entrance again.
+        play(slide, { step, animate: atStep == null });
+        interaction = activate(slide, { details: slides[i]?.details || [], onDrill: back ? null : (to, el) => openDrill(to, el) });
         playMedia(slide, { sound: gesture });
       };
       if (type === "morph" && doc.startViewTransition) {
@@ -601,27 +621,58 @@
         update();
         return;
       }
-      if (index < total - 1) show(index + 1, { dir: 1 });
+      // At the end of a deep-dive page, the talk goes back to the slide it came from.
+      if (back) { closeDrill(); return; }
+      const pos = place(index);
+      if (pos < order.length - 1) show(order[pos + 1], { dir: 1 });
     }
 
     function prev() {
       if (interaction?.detailOpen) { interaction.closeDetail(); return; }
-      if (index > 0) show(index - 1, { dir: -1, fullStep: true });
+      if (back) { closeDrill(); return; }
+      const pos = place(index);
+      if (pos > 0) show(order[pos - 1], { dir: -1, fullStep: true });
     }
 
+    /** Open a deep-dive page (one level: not from another deep-dive page). */
+    function openDrill(to, el = null) {
+      if (back || !slides[to] || story.parent[to] !== index) return;
+      let at = null;
+      if (el && current) {
+        const base = current.getBoundingClientRect();
+        const r = el.getBoundingClientRect();
+        at = { x: Math.round(r.left + r.width / 2 - base.left), y: Math.round(r.top + r.height / 2 - base.top) };
+      }
+      back = { index, step, at };
+      show(to, { dir: 1, via: "drill", at });
+    }
+
+    function closeDrill() {
+      if (!back) return false;
+      const { index: to, step: at, at: point } = back;
+      back = null;
+      show(to, { dir: -1, atStep: at, via: "drill", at: point });
+      return true;
+    }
+
+    /** Go to a slide by its place in the deck; a deep-dive page opens over its slide. */
     function go(i) {
       const target = Math.max(0, Math.min(total - 1, i));
-      if (target !== index) show(target, { dir: target > index ? 1 : -1 });
+      if (target === index) return;
+      const parent = story.parent[target];
+      back = parent != null ? { index: parent, step: Infinity, at: null } : null;
+      show(target, { dir: place(target) >= place(index) ? 1 : -1 });
     }
 
     function toggleNotes() { notes.hidden = !notes.hidden; player.classList.toggle("with-notes", !notes.hidden); requestAnimationFrame(() => current && E.scale(current)); }
 
     function toggleGrid() {
       if (!grid.hidden) { grid.hidden = true; grid.replaceChildren(); return; }
-      grid.replaceChildren(...slides.map((slide, i) => {
+      grid.replaceChildren(...order.map((i, pos) => {
+        const slide = slides[i];
         const el = E.render(slide, { ...(opts.renderOptions || {}), deck, index: i, mode: "thumb", fit: opts.fitFor?.(i) });
-        return h("button", { class: `hs-grid-cell${i === index ? " is-current" : ""}`, type: "button", onclick: (event) => { event.stopPropagation(); grid.hidden = true; grid.replaceChildren(); go(i); } },
-          E.mount(el), h("span", {}, `${i + 1}. ${E.strip(slide.title || slide.message || "")}`));
+        return h("button", { class: `hs-grid-cell${pos === place(index) ? " is-current" : ""}`, type: "button", onclick: (event) => { event.stopPropagation(); grid.hidden = true; grid.replaceChildren(); go(i); } },
+          E.mount(el), h("span", {}, `${pos + 1}. ${E.strip(slide.title || slide.message || "")}`));
       }));
       grid.hidden = false;
     }
@@ -683,7 +734,7 @@
       const put = (sel, i, stepShown) => {
         const box = d.querySelector(sel);
         if (!box) return;
-        if (i >= total) { box.replaceChildren(d.createTextNode("（最後のスライドです）")); return; }
+        if (i == null || i >= total) { box.replaceChildren(d.createTextNode("（最後のスライドです）")); return; }
         const el = E.render(slides[i], { ...(opts.renderOptions || {}), deck, index: i, mode: "thumb", fit: opts.fitFor?.(i) });
         if (stepShown != null && el.dataset.build === "click") for (const g of el.querySelectorAll("[data-g]")) g.style.visibility = Number(g.dataset.g) < stepShown ? "" : "hidden";
         el.style.position = "absolute";
@@ -691,9 +742,10 @@
         box.replaceChildren(d.adoptNode(el));
       };
       put(".pv-now", index, step);
-      put(".pv-next", index + 1, null);
+      put(".pv-next", back ? back.index : order[place(index) + 1], back ? Infinity : null);
+      d.querySelector(".pv-label").textContent = back ? "戻る先のスライド" : "次のスライド";
       d.querySelector(".pv-notes").textContent = E.strip(slides[index]?.notes || "") || "（このスライドにノートはありません）";
-      d.querySelector(".pv-count").textContent = `${index + 1} / ${total}${stepsOf(current?.firstElementChild || d.body) ? `　（${step}/${stepsOf(current.firstElementChild)}）` : ""}`;
+      d.querySelector(".pv-count").textContent = `${place(index) + 1} / ${order.length}${back ? " ・ 深掘り" : ""}${stepsOf(current?.firstElementChild || d.body) ? `　（${step}/${stepsOf(current.firstElementChild)}）` : ""}`;
       layoutPresenterView();
     }
 
@@ -711,16 +763,17 @@
       gesture = true;
       if (["ArrowRight", "ArrowDown", "PageDown", " ", "Enter"].includes(key)) {
         event.preventDefault();
-        if (key === "Enter" && digits) { go(Number(digits) - 1); digits = ""; return; }
+        if (key === "Enter" && digits) { go(order[Math.min(order.length, Math.max(1, Number(digits))) - 1]); digits = ""; return; }
         next();
       } else if (["ArrowLeft", "ArrowUp", "PageUp", "Backspace"].includes(key)) { event.preventDefault(); prev(); }
-      else if (key === "Home") { event.preventDefault(); go(0); }
-      else if (key === "End") { event.preventDefault(); go(total - 1); }
+      else if (key === "Home") { event.preventDefault(); go(order[0]); }
+      else if (key === "End") { event.preventDefault(); go(order[order.length - 1]); }
       else if (/^[0-9]$/.test(key)) { digits = `${digits}${key}`.slice(-3); }
       else if (key === "Escape") {
         if (interaction?.detailOpen) interaction.closeDetail();
         else if (!grid.hidden) toggleGrid();
         else if (!black.hidden) black.hidden = true;
+        else if (back) closeDrill();
         else if (opts.closable !== false) close();
       } else if (key === "f" || key === "F") toggleFullscreen();
       else if (key === "n" || key === "N") toggleNotes();
@@ -766,12 +819,13 @@
       player.remove();
     }
 
+    if (story.parent[index] != null) back = { index: story.parent[index], step: Infinity, at: null };
     show(index, { dir: 1, fullStep: Boolean(opts.fullStep) });
     player.focus({ preventScroll: true });
 
     return {
-      el: player, next, prev, go, destroy, close, toggleNotes, toggleGrid, toggleFullscreen, openPresenterView,
-      get index() { return index; }, get step() { return step; }, get startedAt() { return started; },
+      el: player, next, prev, go, destroy, close, toggleNotes, toggleGrid, toggleFullscreen, openPresenterView, openDrill, closeDrill,
+      get index() { return index; }, get step() { return step; }, get startedAt() { return started; }, get inDrill() { return Boolean(back); },
     };
   }
 

@@ -63,6 +63,8 @@ const shared = {
   animation: animationSchema.optional(),
   kinetic: kineticSchema.optional(),
   backdrop: backdropSchema.optional(),
+  // A deep-dive page: not part of the story, opened by clicking this item ("items[1]") of the slide above.
+  drillOf: z.string().max(30).optional(),
   notes: notesSchema,
 };
 export const titledShape = {

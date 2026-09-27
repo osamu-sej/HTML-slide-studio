@@ -1238,6 +1238,34 @@
 
   const FULL = { title: renderTitle, section: renderSection, closing: renderClosing, hero: renderHero, statement: renderStatement };
 
+  // ---------------------------------------------------------------- story and deep-dive pages
+
+  /**
+   * A slide with `drillOf` ("items[1]") is a deep-dive page: it is not part of the story, and opens when
+   * that item of the nearest story slide above it is clicked. `order` lists the story slides; `parent`
+   * maps a deep-dive page to its slide; `drills` lists each slide's deep-dive pages; `no` is the number
+   * the audience sees (a deep-dive page shows its slide's number).
+   */
+  function storyMap(slides) {
+    const order = [];
+    const parent = {};
+    const drills = {};
+    const no = {};
+    let last = -1;
+    arr(slides).forEach((slide, i) => {
+      if (slide?.drillOf && last >= 0) {
+        parent[i] = last;
+        (drills[last] ||= []).push({ index: i, target: String(slide.drillOf) });
+        no[i] = no[last];
+      } else {
+        order.push(i);
+        last = i;
+        no[i] = order.length;
+      }
+    });
+    return { order, parent, drills, no };
+  }
+
   // ---------------------------------------------------------------- render
 
   /**
@@ -1248,7 +1276,11 @@
     const deck = opts.deck || {};
     const index = opts.index ?? 0;
     const slides = arr(deck.slides);
-    const total = slides.length || 1;
+    const story = storyMap(slides);
+    // Numbers count the story only; a deep-dive page carries the number of the slide it belongs to.
+    const total = story.order.length || 1;
+    const drillParent = slide?.drillOf && index > 0 ? story.parent[index] ?? null : null;
+    const pageNo = story.no[index] ?? index + 1;
     const theme = THEME_IDS.has(deck.theme) ? deck.theme : "clarity";
     const meta = THEMES.find((entry) => entry.id === theme);
     const mode = opts.mode || "edit";
@@ -1271,18 +1303,19 @@
       if (slides[i]?.type === "section") { chapterNo += 1; if (i < index) chapter = slides[i]; }
     }
     ctx.sectionNo = chapterNo || 1;
-    ctx.eyebrow = strip(slide?.subhead || (chapter ? `${pad2(chapter.sectionNo || chapterNo)}  ${strip(chapter.title)}` : ""));
+    ctx.eyebrow = strip(slide?.subhead || (drillParent != null ? `↳ ${strip(slides[drillParent]?.title || slides[drillParent]?.message || "")}` : chapter ? `${pad2(chapter.sectionNo || chapterNo)}  ${strip(chapter.title)}` : ""));
 
     const build = BUILDS.includes(slide?.animation) && slide.animation !== "auto" ? slide.animation : recommendedBuild(type);
     const root = h("div", {
-      class: ["hs-slide", mode === "thumb" || mode === "print" ? "hs-static" : "", mode === "edit" ? "hs-editable" : "", mode === "print" ? "hs-print" : "", live ? "hs-live" : "", motion.numbers !== false ? "hs-numbers" : "", STILL.has(type) ? "hs-stage" : ""],
+      class: ["hs-slide", mode === "thumb" || mode === "print" ? "hs-static" : "", mode === "edit" ? "hs-editable" : "", mode === "print" ? "hs-print" : "", live ? "hs-live" : "", motion.numbers !== false ? "hs-numbers" : "", STILL.has(type) ? "hs-stage" : "", drillParent != null ? "hs-drill" : ""],
       "data-theme": theme, "data-type": type, "data-build": build, "data-tone": meta.dark ? "dark" : "light",
       "data-entrance": ["fade", "blur", "pop", "none"].includes(motion.entrance) ? motion.entrance : "rise",
       "data-hover": ["lift", "focus", "none"].includes(motion.hover) ? motion.hover : "lift",
       "data-ambient": motion.ambient === false ? "off" : "on",
       "data-draw": motion.draw === false ? "off" : "on",
       "data-kinetic": kinetic, "data-backdrop": backdropKind,
-      role: "img", "aria-label": `${index + 1}枚目：${strip(slide?.title || TYPE_LABELS[type] || "")}`,
+      "data-drill-of": drillParent != null ? String(drillParent) : null,
+      role: "img", "aria-label": `${pageNo}枚目${drillParent != null ? "の深掘り" : ""}：${strip(slide?.title || TYPE_LABELS[type] || "")}`,
     });
     if (deck.accent && /^#[0-9a-f]{6}$/i.test(deck.accent)) {
       root.style.setProperty("--accent", deck.accent);
@@ -1323,10 +1356,11 @@
     }
     root.append(overlay);
     if (!["title", "section", "closing"].includes(type)) {
-      root.append(h("footer", { class: "hs-foot" }, h("span", {}, strip(deck.title || "")), h("span", { class: "hs-page" }, `${pad2(index + 1)} / ${pad2(total)}`)));
+      root.append(h("footer", { class: "hs-foot" }, h("span", {}, strip(deck.title || "")), h("span", { class: "hs-page" }, drillParent != null ? `${pad2(pageNo)} ・ 深掘り` : `${pad2(pageNo)} / ${pad2(total)}`)));
     }
     assignGroups(root, build);
     markDetails(root, slide);
+    if (drillParent == null) markDrills(root, story.drills[index]);
     return root;
   }
 
@@ -1367,6 +1401,27 @@
       if (getComputedStyleSafe(anchor) === "static") anchor.style.position = "relative";
       anchor.append(h("span", { class: "hs-detail-badge", style: { top: "-18px", right: "-18px" }, "aria-hidden": "true" }, plusIcon()));
     }
+  }
+
+  /** Items with a deep-dive page get an arrow badge; clicking them in a presentation opens that page. */
+  function markDrills(root, drills) {
+    for (const drill of arr(drills)) {
+      const targets = [...root.querySelectorAll(`[data-item="${cssEscape(drill.target)}"]`)];
+      if (!targets.length) continue;
+      for (const el of targets) el.dataset.drill = String(drill.index);
+      const host = targets.find((el) => !(el instanceof SVGElement)) || null;
+      if (!host) continue;
+      const anchor = host.tagName === "TR" ? host.cells[host.cells.length - 1] : host;
+      if (getComputedStyleSafe(anchor) === "static") anchor.style.position = "relative";
+      [...anchor.children].find((child) => child.classList?.contains("hs-detail-badge"))?.remove();
+      anchor.append(h("span", { class: "hs-drill-badge", "data-drill-to": String(drill.index), title: "クリックで深掘りページへ", "aria-hidden": "true" }, drillIcon()));
+    }
+  }
+
+  function drillIcon() {
+    const el = s("svg", { class: "hs-icon", viewBox: "0 0 24 24" });
+    el.innerHTML = '<path d="M7 17 17 7" pathLength="1"/><path d="M8 7h9v9" pathLength="1"/>';
+    return el;
   }
 
   function plusIcon() {
@@ -1500,7 +1555,7 @@
     W, H, THEMES, PHOTOS, TYPE_LABELS, BUILDS, KINETIC, BACKDROPS, LAYOUT_TYPES: [...Object.keys(FULL), "hero", ...Object.keys(LAYOUTS)].filter((v, i, a) => a.indexOf(v) === i),
     get icons() { return ICONS; },
     setIcons(map) { ICONS = map || {}; },
-    render, mount, fit, scale, fontHref, recommendedBuild, kineticOf, backdropOf, repaintCharts, mediaOf, youtubeId, numParts, splitLabel, strip, rich, icon, h, s, cssEscape,
+    render, mount, fit, scale, fontHref, recommendedBuild, kineticOf, backdropOf, repaintCharts, mediaOf, youtubeId, numParts, splitLabel, strip, rich, icon, h, s, cssEscape, storyMap,
   });
   root.SlideEngine = Engine;
 })(typeof window !== "undefined" ? window : globalThis);
