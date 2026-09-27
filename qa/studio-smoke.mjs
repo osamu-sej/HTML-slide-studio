@@ -68,6 +68,44 @@ await step("add a YouTube video by URL", async () => {
   await page.keyboard.press("Control+z");
 });
 
+await step("upload a video and play it while presenting", async () => {
+  // A short clip recorded in the page itself (no video files needed on disk).
+  const b64 = await page.evaluate(async () => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 320; canvas.height = 180;
+    const ctx = canvas.getContext("2d");
+    const recorder = new MediaRecorder(canvas.captureStream(24), { mimeType: "video/webm" });
+    const chunks = [];
+    recorder.ondataavailable = (event) => chunks.push(event.data);
+    recorder.start();
+    let t = 0;
+    const timer = setInterval(() => { ctx.fillStyle = `hsl(${t * 9}, 70%, 55%)`; ctx.fillRect(0, 0, 320, 180); t += 1; }, 40);
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    clearInterval(timer);
+    const stopped = new Promise((resolve) => { recorder.onstop = resolve; });
+    recorder.stop();
+    await stopped;
+    const bytes = new Uint8Array(await new Blob(chunks, { type: "video/webm" }).arrayBuffer());
+    let text = "";
+    for (const byte of bytes) text += String.fromCharCode(byte);
+    return btoa(text);
+  });
+  const clip = join(outDir, "clip.webm");
+  await writeFile(clip, Buffer.from(b64, "base64"));
+  await page.setInputFiles('#inspector input[type=file][accept^="video"]', clip);
+  await page.waitForSelector('.slide-wrap .hs-placed[data-kind="video"] video', { timeout: 8000 });
+  await page.waitForTimeout(500);
+  await shot("video");
+  await page.click("#presentBtn");
+  await page.waitForSelector(".hs-player .hs-placed video", { timeout: 8000 });
+  await page.waitForTimeout(1200);
+  const playing = await page.evaluate(() => { const video = document.querySelector(".hs-player .hs-placed video"); return Boolean(video && !video.paused && video.src.startsWith("blob:")); });
+  if (!playing) throw new Error("the video does not play in the presentation");
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(400);
+  await page.keyboard.press("Control+z");
+});
+
 await step("grid and outline views", async () => {
   await page.click('label:has-text("一覧")');
   await page.waitForTimeout(800);
@@ -105,6 +143,14 @@ await step("present", async () => {
   await shot("present-1");
   for (let i = 0; i < 4; i += 1) { await page.keyboard.press("ArrowRight"); await page.waitForTimeout(700); }
   await shot("present-2");
+  const popup = page.context().waitForEvent("page", { timeout: 5000 });
+  await page.keyboard.press("p");
+  const view = await popup;
+  await view.waitForSelector(".pv-now .hs-slide", { timeout: 5000 });
+  await view.setViewportSize({ width: 1180, height: 760 });
+  await view.waitForTimeout(600);
+  await shot("presenter-view", view);
+  await view.close();
   await page.click(".hs-player-stage [data-detail]").catch(() => {});
   await page.waitForTimeout(500);
   await page.keyboard.press("Escape");
