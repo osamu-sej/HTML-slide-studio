@@ -1,6 +1,6 @@
 {
   "name": "html-slide-studio",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "private": true,
   "type": "module",
   "description": "AI-built slide decks as moving HTML presentations: outline, edit, talk to the AI, present over a screen share, and export a single HTML file.",
@@ -11,7 +11,8 @@
     "test:py": "python3 -m unittest discover -s test -p \"test_*.py\"",
     "qa": "node qa/shoot.mjs",
     "qa:studio": "node qa/studio-smoke.mjs",
-    "qa:motion": "node qa/studio-motion.mjs"
+    "qa:motion": "node qa/studio-motion.mjs",
+    "qa:drill": "node qa/studio-drill.mjs"
   },
   "engines": {
     "node": ">=20"

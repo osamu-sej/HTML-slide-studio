@@ -9,7 +9,7 @@ const LIMITS = {
   point: 60, step: 50, card: 70, faq: 70, cell: 22, leaf: 24, lane: 24, milestone: 26,
 };
 
-const NOT_ON_SLIDE = new Set(["customImage", "media", "imagePlacement", "notes", "details", "image", "visualAsset", "photoMotion", "animation", "kinetic", "backdrop"]);
+const NOT_ON_SLIDE = new Set(["customImage", "media", "imagePlacement", "notes", "details", "image", "visualAsset", "photoMotion", "animation", "kinetic", "backdrop", "drillOf"]);
 
 /** A few words the AI can act on for every field that is clearly too long (1.3× the guide). */
 export function capacityIssues(slides, { only = null } = {}) {

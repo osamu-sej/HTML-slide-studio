@@ -216,3 +216,38 @@ test("deck-wide design: accent colour, motion switches and theme fonts", async (
   assert.equal(fitted.style.getPropertyValue("--fs"), "0.85");
   assert.ok(fitted.classList.contains("hs-static"), "thumbnails never animate");
 });
+
+test("deep-dive pages: outside the story, numbered by their slide, opened from an item with an arrow", async () => {
+  const { E } = await loadEngine();
+  const slides = [
+    { type: "title", title: "表紙" },
+    { type: "stepUp", title: "発展段階", takeaway: "役割を広げてきた", items: [{ title: "規則", desc: "a" }, { title: "学習", desc: "b" }, { title: "生成", desc: "c" }], details: [{ target: "items[1]", text: "補足" }, { target: "items[2]", text: "生成の補足" }] },
+    { type: "content", title: "学習の仕組み", takeaway: "例から傾向をつかむ", points: ["背景", "具体例"], drillOf: "items[1]" },
+    { type: "cards", title: "選び方", takeaway: "3つの軸", items: [{ title: "用途" }, { title: "品質" }] },
+    { type: "closing", message: "以上" },
+  ];
+  // The engine runs in its own context: compare plain copies of what it returns.
+  const story = JSON.parse(JSON.stringify(E.storyMap(slides)));
+  assert.deepEqual(story.order, [0, 1, 3, 4]);
+  assert.deepEqual(story.parent, { 2: 1 });
+  assert.deepEqual(story.drills[1], [{ index: 2, target: "items[1]" }]);
+  assert.deepEqual([story.no[1], story.no[2], story.no[3]], [2, 2, 3]);
+  assert.deepEqual([...E.storyMap([{ type: "title", drillOf: "items[0]" }, { type: "closing" }]).order], [0, 1], "the cover is never a deep-dive page");
+
+  const deck = deckOf(slides);
+  const parent = E.render(slides[1], { deck, index: 1, mode: "present" });
+  assert.equal(parent.querySelector(".hs-page").textContent, "02 / 04", "numbers count the story only");
+  const opener = [...parent.querySelectorAll('[data-item="items[1]"]')].find((el) => el.dataset.drill);
+  assert.equal(opener?.dataset.drill, "2");
+  assert.equal(parent.querySelectorAll(".hs-drill-badge").length, 1);
+  assert.equal(parent.querySelector('[data-item="items[1]"] .hs-detail-badge'), null, "the arrow replaces the details mark on that item");
+  assert.ok(parent.querySelector('[data-item="items[2]"] .hs-detail-badge'), "other items keep their details");
+
+  const page = E.render(slides[2], { deck, index: 2, mode: "present" });
+  assert.ok(page.classList.contains("hs-drill"));
+  assert.equal(page.dataset.drillOf, "1");
+  assert.equal(page.querySelector(".hs-page").textContent, "02 ・ 深掘り");
+  assert.match(page.querySelector(".hs-eyebrow").textContent, /↳ 発展段階/);
+  assert.equal(page.querySelectorAll("[data-drill]").length, 0, "one level: a deep-dive page opens nothing further");
+  assert.equal(E.render(slides[3], { deck, index: 3, mode: "thumb" }).querySelector(".hs-page").textContent, "03 / 04");
+});

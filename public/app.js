@@ -448,6 +448,8 @@ function normalizeSlide(raw, index, total) {
     slide.details = slide.details.filter((d) => d && typeof d.target === "string" && strip(d.text)).map((d) => ({ target: d.target.slice(0, 30), ...(strip(d.title) ? { title: strip(d.title).slice(0, 60) } : {}), text: String(d.text).slice(0, 400) })).slice(0, 12);
     if (!slide.details.length) delete slide.details;
   } else delete slide.details;
+  if (typeof slide.drillOf === "string" && slide.drillOf.trim() && index > 0 && TITLED(type)) slide.drillOf = slide.drillOf.trim().slice(0, 30);
+  else delete slide.drillOf;
   if (index === 0 && total > 1 && type !== "title") return { type: "title", title: strip(slide.title) || "無題の資料" };
   return slide;
 }
@@ -618,7 +620,7 @@ function extractUnits(slide) {
 
 function convertSlide(slide, type) {
   const next = defaultSlide(type);
-  for (const key of ["title", "takeaway", "subhead", "notes", "visualAsset", "customImage", "imagePlacement", "media", "photoMotion", "kinetic", "backdrop"]) {
+  for (const key of ["title", "takeaway", "subhead", "notes", "visualAsset", "customImage", "imagePlacement", "media", "photoMotion", "kinetic", "backdrop", "drillOf"]) {
     if (slide[key] && (key !== "takeaway" || TITLED(type))) next[key] = clone(slide[key]);
   }
   if (type === "closing" && !next.message) next.message = slide.takeaway || slide.message || "";
@@ -768,7 +770,11 @@ function renderOptions(extra = {}) {
 /** Everything a slide's picture depends on besides the slide itself: design, position, chapter. */
 function contextKey(index, deck = state.deck) {
   const chapters = deck.slides.slice(0, index + 1).filter((slide) => slide.type === "section").map((slide) => `${slide.sectionNo ?? ""}${slide.title}`);
-  return JSON.stringify([deck.theme, deck.accent ?? "", deck.motion, deck.title, deck.purpose, deck.audience, index, deck.slides.length, chapters]);
+  // Page numbers count the story; a slide shows arrows for its deep-dive pages; a deep-dive page names its slide.
+  const story = E.storyMap(deck.slides);
+  const parent = story.parent[index];
+  const drills = (story.drills[index] ?? []).map((drill) => `${drill.index}:${drill.target}`);
+  return JSON.stringify([deck.theme, deck.accent ?? "", deck.motion, deck.title, deck.purpose, deck.audience, index, deck.slides.length, chapters, story.no[index], story.order.length, drills, parent != null ? deck.slides[parent]?.title ?? "" : null]);
 }
 
 const fitState = { byKey: new Map(), epoch: 0, running: false, timer: null };
@@ -946,34 +952,63 @@ function replaceSlide(index, slide) {
   markChanged({ structural: true });
 }
 
+/** Returns where the slide went: a story slide never lands between a slide and its deep-dive pages. */
 function insertSlide(index, slide) {
-  if (state.deck.slides.length >= 50) return toast("スライドは50枚までです");
+  if (state.deck.slides.length >= 50) { toast("スライドは50枚までです"); return -1; }
+  if (!slide.drillOf) { const story = storyOf(); while (story.parent[index] != null) index += 1; }
   pushUndo();
   state.deck.slides.splice(index, 0, slide);
   state.selected = index;
   markChanged({ structural: true });
+  return index;
 }
 
+/** Deleting a slide deletes its deep-dive pages with it. */
 function deleteSlide(index) {
-  if (state.deck.slides.length <= 2) return toast("スライドは2枚以上必要です");
+  const story = storyOf();
+  const count = story.parent[index] == null ? groupEnd(index, story) - index : 1;
+  if (state.deck.slides.length - count < 2) return toast("スライドは2枚以上必要です");
   pushUndo();
-  state.deck.slides.splice(index, 1);
+  state.deck.slides.splice(index, count);
   state.selected = Math.min(index, state.deck.slides.length - 1);
   markChanged({ structural: true });
-  toast(`${index + 1}枚目を削除しました（⌘Zで元に戻せます）`);
+  toast(count > 1 ? `${index + 1}枚目と、その深掘りページ${count - 1}枚を削除しました（⌘Zで元に戻せます）` : `${index + 1}枚目を削除しました（⌘Zで元に戻せます）`);
 }
 
-function moveSlide(from, to) {
-  const last = state.deck.slides.length - 1;
-  if (from <= 0 || from >= last || to <= 0 || to >= last || from === to) return;
+/** Move a slide (with its deep-dive pages) in front of the slide at `before`. Deep-dive pages move with their slide. */
+function moveSlideBefore(from, before) {
+  const slides = state.deck.slides;
+  const last = slides.length - 1;
+  const story = storyOf();
+  if (story.parent[from] != null) return;
+  const end = groupEnd(from, story);
+  while (story.parent[before] != null) before += 1;
+  if (from <= 0 || from >= last || before <= 0 || before > last || (before >= from && before <= end)) return;
   pushUndo();
-  const [slide] = state.deck.slides.splice(from, 1);
-  state.deck.slides.splice(to, 0, slide);
-  state.selected = to;
+  const group = slides.splice(from, end - from);
+  const at = before > from ? before - group.length : before;
+  slides.splice(at, 0, ...group);
+  state.selected = at;
   markChanged({ structural: true });
 }
 
 const slideCount = () => state.deck?.slides.length ?? 0;
+const storyOf = (deck = state.deck) => E.storyMap(deck.slides);
+
+/** Where a slide's group (the slide and its deep-dive pages) ends. */
+function groupEnd(index, story = storyOf()) {
+  const head = story.parent[index] ?? index;
+  let end = head + 1;
+  while (story.parent[end] === head) end += 1;
+  return end;
+}
+
+/** A copy of a slide as a story slide (a copied deep-dive page stands on its own). */
+function copyOf(slide) {
+  const copy = clone(slide);
+  delete copy.drillOf;
+  return copy;
+}
 
 function select(index) {
   if (!state.deck) return;
@@ -1237,7 +1272,7 @@ async function insertSavedSlide(record, index) {
     if (!source) throw new Error("スライドが見つかりません。");
     await assertLibraryMedia({ slides: [source] });
     const at = Math.min(state.selected + 1, state.deck.slides.length - 1);
-    insertSlide(at, JSON.parse(JSON.stringify(source)));
+    insertSlide(at, copyOf(source));
     $("libraryDialog").close();
     ensureMedia({ slides: [source] }).then((added) => { if (added) { thumbCache.clear(); renderFilmstrip(); renderStage(); } });
     toast(`${index + 1}枚目を現在の資料に追加しました`);
@@ -1340,7 +1375,14 @@ function lintDeck() {
   const result = deck.slides.map(() => []);
   const add = (i, field, message, severity = "warning", fix = null, plain = false) => result[i].push({ slide: i, field, kind: "lint", severity, message, fix, plain });
   const titles = new Map();
+  const story = E.storyMap(deck.slides);
+  const itemsOf = new Map();
   deck.slides.forEach((slide, i) => {
+    const parent = story.parent[i];
+    if (parent != null) {
+      if (!itemsOf.has(parent)) itemsOf.set(parent, new Set(itemKeys(deck.slides[parent], parent).map((entry) => entry.key)));
+      if (!itemsOf.get(parent).has(slide.drillOf)) add(i, "title", `${parent + 1}枚目に、このページを開く項目が見つかりません（項目が変わった可能性があります）。右の「深掘りページ」で開く項目を選び直してください`, "warning", null, true);
+    }
     const texts = textEntries(slide);
     // Table headers ("項目") and "—" in a table cell are real content; so is a title like "お願いしたいこと".
     const isPlaceholder = ([path, text]) => {
@@ -1447,28 +1489,31 @@ function renderFilmstrip() {
   const strip_ = $("filmstrip");
   if (!state.deck) { strip_.replaceChildren(); return; }
   const last = state.deck.slides.length - 1;
+  const story = storyOf();
   const items = state.deck.slides.map((slide, index) => {
     const issues = issuesFor(index).filter((issue) => issue.severity !== "info");
     const errors = issues.filter((issue) => issue.severity === "error").length;
-    const movable = index > 0 && index < last;
+    const parent = story.parent[index];
+    const movable = index > 0 && index < last && parent == null;
     const flags = [];
     if (slide.media?.kind === "video" || E.youtubeId(slide.media?.src)) flags.push(h("span", { title: "動画あり" }, "▶"));
     if (slide.media?.kind === "lottie") flags.push(h("span", { title: "アニメーション（Lottie）あり" }, "✦"));
     if (E.backdropOf(slide, slide.type, state.deck.motion) || (slide.kinetic && slide.kinetic !== "none")) flags.push(h("span", { title: "モーショングラフィックあり" }, "◎"));
     if (slide.details?.length) flags.push(h("span", { title: "クリックで開く詳細あり" }, "＋"));
+    if (story.drills[index]?.length) flags.push(h("span", { title: `クリックで移る深掘りページ ${story.drills[index].length}枚` }, `↗${story.drills[index].length}`));
     const build = slide.animation || E.recommendedBuild(slide.type);
     if (build === "click") flags.push(h("span", { title: "クリックで順番に表示" }, "⋯"));
     const item = h("div", {
-      class: `film-item${index === state.selected ? " selected" : ""}`,
+      class: `film-item${index === state.selected ? " selected" : ""}${parent != null ? " is-drill" : ""}`,
       draggable: movable ? "true" : null,
-      title: `${index + 1}. ${strip(slide.title) || typeLabel(slide.type)}`,
+      title: parent != null ? `${index + 1}. ${parent + 1}枚目の深掘りページ：${strip(slide.title) || typeLabel(slide.type)}` : `${index + 1}. ${strip(slide.title) || typeLabel(slide.type)}`,
       onclick: () => select(index),
       ondragstart: (event) => { dragFrom = index; event.dataTransfer.effectAllowed = "move"; item.classList.add("dragging"); },
       ondragend: () => { dragFrom = null; item.classList.remove("dragging"); strip_.querySelectorAll(".drop-before").forEach((el) => el.classList.remove("drop-before")); },
       ondragover: (event) => { if (dragFrom != null && index > 0 && index <= last) { event.preventDefault(); item.classList.add("drop-before"); } },
       ondragleave: () => item.classList.remove("drop-before"),
-      ondrop: (event) => { event.preventDefault(); if (dragFrom != null) moveSlide(dragFrom, dragFrom < index ? index - 1 : index); },
-    }, h("div", { class: "film-no" }, index + 1), thumb(index, "film"),
+      ondrop: (event) => { event.preventDefault(); if (dragFrom != null) moveSlideBefore(dragFrom, index); },
+    }, h("div", { class: "film-no" }, parent != null ? h("span", { title: `${index + 1}枚目（深掘りページ）` }, "↳") : index + 1), thumb(index, "film"),
     issues.length ? h("span", { class: `film-badge${errors ? " error" : ""}`, title: `${issues.length}件の注意` }, issues.length) : null,
     flags.length ? h("span", { class: "film-flags" }, flags) : null);
     return item;
@@ -1490,13 +1535,15 @@ function renderStage() {
   const videos = deck.slides.filter((slide) => slide.media?.kind === "video" || E.youtubeId(slide.media?.src)).length;
   const lotties = deck.slides.filter((slide) => slide.media?.kind === "lottie").length;
   const details = deck.slides.reduce((sum, slide) => sum + (slide.details?.length ?? 0), 0);
-  $("deckMeta").textContent = [deck.audience && `対象：${deck.audience}`, `${deck.slides.length}枚`, `${types}種類のレイアウト`, videos ? `動画${videos}本` : "", lotties ? `アニメーション${lotties}個` : "", details ? `詳細${details}か所` : ""].filter(Boolean).join(" ・ ");
+  const story = storyOf();
+  const drillCount = deck.slides.length - story.order.length;
+  $("deckMeta").textContent = [deck.audience && `対象：${deck.audience}`, `${story.order.length}枚${drillCount ? `＋深掘り${drillCount}枚` : ""}`, `${types}種類のレイアウト`, videos ? `動画${videos}本` : "", lotties ? `アニメーション${lotties}個` : "", details ? `詳細${details}か所` : ""].filter(Boolean).join(" ・ ");
   if (state.view === "outline") return renderOutline(body);
   if (state.view === "grid") {
     body.replaceChildren(h("div", { class: "stage-grid" }, deck.slides.map((slide, index) => h("div", {
       class: `grid-item${index === state.selected ? " selected" : ""}`,
       onclick: () => { setView("single"); select(index); },
-    }, thumb(index, "grid"), h("div", { class: "grid-label" }, h("span", {}, `${index + 1}. ${typeLabel(slide.type)}`), issuesFor(index).length ? h("span", { style: { color: "var(--warn)" } }, `注意${issuesFor(index).length}`) : null)))));
+    }, thumb(index, "grid"), h("div", { class: "grid-label" }, h("span", {}, story.parent[index] != null ? `↳ ${story.parent[index] + 1}枚目の深掘り・${typeLabel(slide.type)}` : `${index + 1}. ${typeLabel(slide.type)}`), issuesFor(index).length ? h("span", { style: { color: "var(--warn)" } }, `注意${issuesFor(index).length}`) : null)))));
     return;
   }
   const index = state.selected;
@@ -1508,7 +1555,7 @@ function renderStage() {
   body.replaceChildren(importCallout() || "", h("div", { class: "stage-single" },
     wrap,
     h("div", { class: "stage-caption" },
-      h("span", {}, `${index + 1} / ${deck.slides.length}　${typeLabel(slide.type)}　・　動き：${BUILD_INFO[build]?.[0] ?? build}${slide.details?.length ? `　・　詳細${slide.details.length}か所` : ""}`),
+      h("span", {}, `${index + 1} / ${deck.slides.length}　${story.parent[index] != null ? `${story.parent[index] + 1}枚目の深掘りページ　・　` : ""}${typeLabel(slide.type)}　・　動き：${BUILD_INFO[build]?.[0] ?? build}${slide.details?.length ? `　・　詳細${slide.details.length}か所` : ""}${story.drills[index]?.length ? `　・　深掘り${story.drills[index].length}枚` : ""}`),
       h("span", { class: "stage-nav" },
         h("button", { class: "btn", type: "button", title: "このスライドの動きを確認（編集画面では静止しています）", onclick: () => previewMotion() }, "▶ 動きを確認"),
         h("button", { class: "btn", type: "button", disabled: index === 0, onclick: () => select(index - 1) }, "← 前へ"),
@@ -1549,6 +1596,7 @@ function renderOutline(body) {
     return h("tr", { class: index === state.selected ? "selected" : "" },
       h("td", {}, h("button", { class: "outline-no", type: "button", title: "このスライドを開く", onclick: () => { setView("single"); select(index); } }, index + 1)),
       h("td", { style: { width: "130px" } }, h("span", { class: "outline-type" }, typeLabel(slide.type)),
+        slide.drillOf && index > 0 ? h("div", { class: "hint", style: { "margin-top": "6px" } }, "↳ 深掘りページ（本編に数えない）") : null,
         issues.length ? h("div", { class: "hint", style: { color: "var(--warn)", "margin-top": "6px" } }, `⚠ 注意${issues.length}件`) : null),
       h("td", {}, field("title", slide.type === "title" ? "資料タイトル" : "タイトル", 30, "title")),
       h("td", {}, field(secondKey, secondLabel, secondMax, "")));
@@ -2386,15 +2434,21 @@ function motionGraphicsSection(slide) {
 
 const ITEM_NAMES = { items: "項目", steps: "工程", points: "要点", rows: "行", milestones: "時期", lanes: "レーン", levels: "段", branches: "枝", stats: "指標", flows: "流れ", message: "アクション", leftItems: "左", rightItems: "右" };
 
-function itemLabel(slide, key) {
+/** The words of one item ("items[1]") of a slide. */
+function itemText(slide, key) {
   const path = parseField(key);
   let value = getPath(slide, path);
   if (path[0] === "message") value = String(slide.message || "").split(/\n|／|(?<=。)(?=.)/).map((part) => part.trim()).filter(Boolean)[path[1]];
   if (Array.isArray(value)) value = value.join(" / ");
   if (value && typeof value === "object") value = value.title ?? value.label ?? value.q ?? value.value ?? (Array.isArray(value.steps) ? value.steps.join("→") : "");
+  return strip(value);
+}
+
+function itemLabel(slide, key) {
+  const path = parseField(key);
   const name = ITEM_NAMES[path[0]] ?? path[0];
   const n = typeof path[1] === "number" ? path[1] + 1 : "";
-  return `${name}${n}「${strip(value).slice(0, 22)}」`;
+  return `${name}${n}「${itemText(slide, key).slice(0, 22)}」`;
 }
 
 function itemKeys(slide, index) {
@@ -2425,6 +2479,78 @@ function detailsSection(slide, index) {
     keys.length && details.length < 12 ? h("button", { class: "btn add-item", type: "button", onclick: () => commit(() => { slide.details = [...details, { target: (free ?? keys[0]).key, text: "" }]; }, true) }, "＋ 詳細を追加") : null);
 }
 
+/** A blank deep-dive page for one item of a slide, right after the slide's other deep-dive pages. */
+function addDrill(index, target) {
+  const slide = state.deck.slides[index];
+  const text = itemText(slide, target) || "深掘り";
+  const at = insertSlide(groupEnd(index), { type: "content", title: text.slice(0, 40), takeaway: "", points: ["背景：なぜそうなるのか", "具体例：現場ではどうなっているか", "根拠：数字や出典"], drillOf: target });
+  if (at >= 0) toast(`「${text.slice(0, 20)}」の深掘りページを作りました。発表中にその項目をクリックすると開きます`);
+}
+
+function addDrillWithAi(index, target) {
+  const slide = state.deck.slides[index];
+  const status = (text) => { const el = document.getElementById("aiStatus"); if (el) el.textContent = text; };
+  const instruction = `${index + 1}枚目「${strip(slide.title)}」の${itemLabel(slide, target)}を深掘りするページを作る。本編の流れには入らず、発表中にこの項目をクリックしたときだけ開く補足として、この項目の背景・内訳・具体例・根拠を1枚で見せる。元のスライドに書いてあることを繰り返さない。type は title・section・closing 以外から内容に合うものを選ぶ`;
+  return aiInsertSlide(groupEnd(index), instruction, status, { drillOf: target });
+}
+
+/** Make a deep-dive page part of the story: it moves after its slide's other deep-dive pages. */
+function makeStorySlide(index) {
+  const end = groupEnd(index);
+  pushUndo();
+  const [page] = state.deck.slides.splice(index, 1);
+  delete page.drillOf;
+  state.deck.slides.splice(end - 1, 0, page);
+  state.selected = end - 1;
+  markChanged({ structural: true });
+  toast("本編のスライドにしました（⌘Zで元に戻せます）");
+}
+
+function drillSection(slide, index) {
+  const story = storyOf();
+  const keys = itemKeys(slide, index);
+  const drills = story.drills[index] ?? [];
+  const taken = new Set(drills.map((drill) => drill.target));
+  const free = keys.filter((entry) => !taken.has(entry.key));
+  const pick = h("select", { "aria-label": "深掘りページを開く項目" }, free.map((entry) => h("option", { value: entry.key }, entry.label)));
+  const rows = drills.map((drill) => {
+    const page = state.deck.slides[drill.index];
+    return h("div", { class: "drill-row" },
+      h("select", { "aria-label": "このページを開く項目", onchange: (event) => { pushUndo(); page.drillOf = event.target.value; markChanged({ structural: true }); } },
+        keys.some((entry) => entry.key === drill.target) ? null : h("option", { value: drill.target, selected: true }, `（見つからない項目：${drill.target}）`),
+        keys.map((entry) => h("option", { value: entry.key, selected: entry.key === drill.target, disabled: entry.key !== drill.target && taken.has(entry.key) }, entry.label))),
+      h("button", { class: "btn btn-sm drill-open", type: "button", title: strip(page.title) || typeLabel(page.type), onclick: () => select(drill.index) }, `${drill.index + 1}枚目を開く`),
+      h("button", { class: "btn btn-ghost btn-sm btn-danger", type: "button", title: "この深掘りページを削除", onclick: () => deleteSlide(drill.index) }, "✕"));
+  });
+  return h("div", { class: "section", id: "drillSection" },
+    h("div", { class: "section-title" }, h("span", {}, `クリックで移る深掘りページ（${drills.length}）`)),
+    h("p", { class: "hint section-note" }, keys.length
+      ? "発表中に項目をクリックすると、本編の流れに入っていない深掘りページへ移ります。Esc・←、または最後まで進めると元のスライドに戻ります。"
+      : "このレイアウトには、深掘りページを付けられる項目がありません。"),
+    rows,
+    free.length ? h("div", { class: "drill-add" }, pick,
+      h("span", { class: "btns" },
+        h("button", { class: "btn btn-sm", type: "button", onclick: () => addDrill(index, pick.value) }, "＋ 白紙で作る"),
+        h("button", { class: "btn btn-sm", type: "button", disabled: !state.codexAuthorized || state.aiBusy, title: state.codexAuthorized ? "その項目を深掘りするページをAIに作ってもらう" : "Codexに接続すると使えます", onclick: () => addDrillWithAi(index, pick.value) }, "✦ AIで作る"))) : null);
+}
+
+function drillInfoSection(slide, index, parent) {
+  const story = storyOf();
+  const owner = state.deck.slides[parent];
+  const keys = itemKeys(owner, parent);
+  const taken = new Set((story.drills[parent] ?? []).filter((drill) => drill.index !== index).map((drill) => drill.target));
+  return h("div", { class: "section drill-info" },
+    h("div", { class: "section-title" }, h("span", {}, "深掘りページ")),
+    h("p", { class: "hint section-note" }, `${parent + 1}枚目「${strip(owner.title || owner.message || "")}」の項目をクリックすると開くページです。本編の番号には数えず、発表中は Esc・← で元のスライドに戻ります。`),
+    h("div", { class: "field" }, h("div", { class: "label-row" }, h("label", { for: "drillTarget" }, "開く項目")),
+      h("select", { id: "drillTarget", onchange: (event) => { pushUndo(); slide.drillOf = event.target.value; markChanged({ structural: true }); } },
+        keys.some((entry) => entry.key === slide.drillOf) ? null : h("option", { value: slide.drillOf, selected: true }, `（見つからない項目：${slide.drillOf}）`),
+        keys.map((entry) => h("option", { value: entry.key, selected: entry.key === slide.drillOf, disabled: taken.has(entry.key) }, entry.label)))),
+    h("div", { class: "btns", style: { display: "flex", gap: "6px", "flex-wrap": "wrap" } },
+      h("button", { class: "btn btn-sm", type: "button", onclick: () => select(parent) }, "← 元のスライドへ"),
+      h("button", { class: "btn btn-sm", type: "button", title: "深掘りページをやめて、本編の流れに入れます", onclick: () => makeStorySlide(index) }, "本編のスライドにする")));
+}
+
 function renderInspector() {
   const panel = $("inspector");
   if (!state.deck || state.mode !== "edit") { panel.replaceChildren(); return; }
@@ -2452,6 +2578,7 @@ function renderInspector() {
         chips.map((chip) => h("button", { class: "chip", type: "button", disabled: !canAi, title: "AIとの会話で、この1枚への変更を提案してもらいます", onclick: () => sendChat(`この1枚を${chip}`) }, chip)),
         h("button", { class: "chip ai", type: "button", disabled: !canAi, title: "見せ方の違う3つの案を並べて選べます", onclick: () => requestVariants(index) }, "✦ 別案を3つ"),
         h("span", { id: "aiStatus", class: "hint", style: { "flex-basis": "100%" } }, canAi ? "変更は「AIと話す」に提案として届き、確認してから採用できます。" : "Codexに接続すると使えます。")),
+      storyOf().parent[index] != null ? drillInfoSection(slide, index, storyOf().parent[index]) : null,
       h("div", { class: "section" }, h("div", { class: "section-title" }, h("span", {}, "内容")),
         slide.type === "hero" ? h("p", { class: "hint section-note" }, "写真いっぱいに見出しを重ねるスライドです。写真・動画は下で選びます。") : null,
         specFor(slide.type).map((field) => inputFor(field, [field.key], slide))),
@@ -2459,6 +2586,7 @@ function renderInspector() {
       TITLED(slide.type) ? motionSection(slide, index) : null,
       motionGraphicsSection(slide),
       TITLED(slide.type) || slide.type === "closing" ? detailsSection(slide, index) : null,
+      TITLED(slide.type) && index > 0 && storyOf().parent[index] == null ? drillSection(slide, index) : null,
       h("div", { class: "section" }, h("div", { class: "section-title" }, h("span", {}, "スピーカーノート"),
           h("span", { class: "btns" },
             h("button", { class: "btn btn-sm", type: "button", title: "スライドの内容から、すぐに読み上げ原稿を作ります", onclick: () => { applyNotes([{ slide: index, text: quickNotes(index) }]); toast("ノートを作成しました（⌘Zで元に戻せます）"); } }, "簡易作成"),
@@ -2466,7 +2594,7 @@ function renderInspector() {
         h("textarea", { rows: 4, placeholder: "発表時に話す内容（発表者ビュー・ノート欄に表示されます）", "data-path": "notes", oninput: (event) => { beginEdit(); setPath(slide, ["notes"], event.target.value); markChanged(); } }, slide.notes ?? ""))),
     h("div", { class: "inspector-foot" },
       h("button", { class: "btn", type: "button", onclick: () => openTypeDialog("insert") }, "＋ 後ろに追加"),
-      h("button", { class: "btn", type: "button", disabled: locked, onclick: () => insertSlide(index + 1, clone(slide)) }, "複製"),
+      h("button", { class: "btn", type: "button", disabled: locked, onclick: () => insertSlide(index + 1, copyOf(slide)) }, "複製"),
       h("span", { style: { flex: "1" } }),
       h("button", { class: "btn btn-danger", type: "button", disabled: locked, onclick: () => deleteSlide(index) }, "削除")));
   for (const key of keepOpen) panel.querySelector(`details[data-key="${CSS.escape(key)}"]`)?.setAttribute("open", "");
@@ -2909,6 +3037,7 @@ function restoreImages(slides, previous) {
     }
     if (typeof slide.media === "string" || (slide.media && !slide.media.src)) delete slide.media;
     if (source?.media && !slide.media) slide.media = clone(source.media);
+    if (source?.drillOf && !slide.drillOf && TITLED(slide.type)) slide.drillOf = source.drillOf;
     if (source?.imagePlacement && slide.customImage === source.customImage && !slide.imagePlacement) slide.imagePlacement = source.imagePlacement;
   });
   // Photos and videos whose slide disappeared float on the first slides that have none.
@@ -2956,7 +3085,7 @@ function unsourcedNote(issues = []) {
   return values.length ? `素材にない数値があります：${values.slice(0, 4).map((value) => `「${value}」`).join("")}${values.length > 4 ? "ほか" : ""}。確認してください` : "";
 }
 
-function aiInsertSlide(at, instruction, onStatus = () => {}) {
+function aiInsertSlide(at, instruction, onStatus = () => {}, { drillOf = null } = {}) {
   return new Promise((resolve) => {
     if (state.aiBusy) return resolve(false);
     setAiBusy(true);
@@ -2965,9 +3094,11 @@ function aiInsertSlide(at, instruction, onStatus = () => {}) {
         onProgress: (job) => onStatus(`${job.stage}：${job.detail}`),
         onDone: (job) => {
           setAiBusy(false);
-          insertSlide(at, normalizeSlide(job.slide, at, state.deck.slides.length + 1));
-          toast(`${at + 1}枚目にスライドを追加しました`);
-          resolve(true);
+          const slide = normalizeSlide(job.slide, at, state.deck.slides.length + 1);
+          if (drillOf) slide.drillOf = drillOf;
+          const placed = insertSlide(at, slide);
+          if (placed >= 0) toast(drillOf ? `${placed + 1}枚目に深掘りページを作りました。発表中にその項目をクリックすると開きます` : `${placed + 1}枚目にスライドを追加しました`);
+          resolve(placed >= 0);
         },
         onFail: (job) => { setAiBusy(false); onStatus(`作成できませんでした：${job.error || job.detail}`); resolve(false); },
       }))
@@ -3698,7 +3829,7 @@ function commandList() {
       cmd("スライド", "▶", "このスライドの動きを確認", () => previewMotion()),
       cmd("スライド", "＋", "スライドを追加", () => openTypeDialog("insert")),
       cmd("スライド", "⇄", "このスライドのレイアウトを変更", () => openTypeDialog("change")),
-      cmd("スライド", "⧉", "このスライドを複製", () => insertSlide(state.selected + 1, clone(deck.slides[state.selected]))),
+      cmd("スライド", "⧉", "このスライドを複製", () => insertSlide(state.selected + 1, copyOf(deck.slides[state.selected]))),
       cmd("スライド", "✎", "このスライドを編集欄で開く", () => setPanel("form")),
       cmd("レビュー", "✉", "レビュー用ファイルを書き出す（相手はブラウザでコメント）", () => exportReviewFile()),
       cmd("レビュー", "⇩", "レビューを取り込む（コメント付きPPTX・レビュー結果）", () => $("reviewImportFile").click()),
@@ -4359,6 +4490,8 @@ function bind() {
   document.querySelectorAll("input[name=view]").forEach((radio) => radio.addEventListener("change", (event) => setView(event.target.value)));
   $("stageBody").addEventListener("click", (event) => {
     if (state.motionPreview || event.target.closest(".inline-tools, .ph-handle")) return;
+    const badge = event.target.closest(".slide-wrap .hs-drill-badge[data-drill-to]");
+    if (badge) { if (state.inline) finishInlineEdit(true); select(Number(badge.dataset.drillTo)); return; }
     const target = event.target.closest(".slide-wrap .hs-slide.hs-editable [data-field]");
     if (target && target.classList.contains("hs-editing")) return;
     if (state.inline) finishInlineEdit(true);

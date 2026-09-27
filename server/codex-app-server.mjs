@@ -5,6 +5,7 @@ import { isAbsolute, join, relative, sep } from "node:path";
 import readline from "node:readline";
 
 import { LOOK_ADVICE, LOOKS, maxSameLook } from "../public/layout-looks.mjs";
+import { drillParents } from "./chat.mjs";
 import { slideMeaning } from "./visual-relevance.mjs";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -122,6 +123,7 @@ const LAYOUT_GUIDE = [
   "- photoMotion: 写真の動き。none / zoom（ゆっくり寄る）/ pan（ゆっくり横に流れる）/ float（ふわっと漂う）/ parallax（マウスに合わせて奥行き）。写真のあるスライドだけ",
   "- kinetic（モーショングラフィック：大きな文字の動き）: auto（省略可。表紙・章扉・statement・hero・closing は資料の設定で自動的に動く）/ none / mask（下から立ち上がる。上品で汎用）/ words（ことばごとにぼかしから浮かぶ）/ chars（1文字ずつ弾む。研修・キックオフ向け）/ type（タイプライター。問いかけ・引用に）/ scramble（文字が入れ替わって決まる。テクノロジー・データの話題に）。本文スライドに付けるとタイトルが動く。資料全体で1〜2種類にそろえ、本文スライドには多用しない",
   "- backdrop（モーショングラフィック：スライドの後ろで動く図形）: auto（省略可）/ none / particles（粒子が昇る）/ waves（波が流れる）/ grid（グリッドと走査線。データ・DX）/ orbits（軌道を回る。AI・テクノロジー・全体像）/ gradient（色がゆらぐ。ビジョン・未来）/ lines（線を光が流れる。つながり・流れ・データ連携）/ shapes（図形が漂う。研修・アイデア）。表紙・章扉・statement・closing に向く。本文の多いスライドには付けない。資料全体で同じ種類にそろえる",
+  "- drillOf（深掘りページ）: このスライドを本編の流れから外し、直前の本編スライドの項目（items[1]、steps[0] など details の target と同じ書き方）をクリックしたときだけ開くページにする。本編の番号には数えず、発表中は Esc・← で元のスライドに戻る。1つの項目に深掘りページは1枚まで、深掘りページからさらに深掘りはしない。頼まれたときだけ作り、既存の drillOf のあるスライドは消さない・動かさない・drillOf を外さない",
   "- details（その項目をクリックすると開く補足カード）: [{target（項目の配列名と0始まりの番号。例: items[0]、steps[2]、milestones[1]、levels[0]、points[1]、branches[0]、leftItems[0]、stats[0]、rows[0]）, title（任意・20字以内）, text（120字以内）}]。スライドの本文は短いまま、話しながら見せたい根拠・具体例・内訳・数値の出所を text に書く（素材にない数値は書かない）。既存の details は頼まれない限りそのまま残す",
 ];
 
@@ -187,7 +189,8 @@ export function deckNarrativeLines(deck, selected = []) {
   return slides.map((slide, index) => {
     const claim = slide.takeaway || slide.conclusion || slide.message || slide.text || slide.title || "";
     const body = slideMeaning(slide).replace(claim, "").trim();
-    const role = index === 0 ? "導入" : index === slides.length - 1 ? "結論・依頼" : "論点";
+    const parent = drillParents(slides)[index];
+    const role = parent != null ? `深掘り（${parent + 1}枚目の ${slide.drillOf} から開く。本編外）` : index === 0 ? "導入" : index === slides.length - 1 ? "結論・依頼" : "論点";
     const detail = targets.has(index) || targets.has(index - 1) || targets.has(index + 1) ? body.slice(0, 260) : body.slice(0, 100);
     return `${index + 1}枚目 [${role}/${slide.type}] ${claim}${detail ? `｜根拠・内容: ${detail}` : ""}`;
   });
@@ -235,6 +238,7 @@ export function buildChatPrompt({ deck, message, history = [], current = 0, focu
     "- 「動きをつけて」「クリックで詳しく」「写真を動かして」などは animation・details・photoMotion で応える。「モーショングラフィック」「文字を動かして」「背景を動かして」「もっと派手に」は kinetic・backdrop（1枚なら各スライド、全体なら motion）で応える。動画やLottieアニメーションはユーザーが画面の「写真・動画・アニメーション」から追加するもので、あなたは入れられない",
     "- 写真は、ユーザーが明示的に求めたときだけ新規選択・変更する。見た目を良くする依頼でも、無関係な素材を足さずレイアウト・余白・情報の強弱を優先する",
     "- 1枚目は title、最後は closing のままにする。表紙と最後は削除・移動しない",
+    "- 「〇〇を深掘りするページを作って」「クリックで詳しいページに飛べるように」と頼まれたら、元のスライドの後ろに insert し、content に drillOf（元のスライドの項目。例: items[1]）を入れる。本文はその項目の背景・内訳・具体例・根拠で、元のスライドの繰り返しにしない。drillOf のあるスライド（深掘りページ）は本編の流れに入らないので、順番の入れ替えや枚数の話では数えない",
     "- 入力にない数値や事実は作らない。既存の数値は変えない。「[画像あり]」「[写真・動画あり]」の値はそのまま残す",
     "- 新しい画像は生成できない。既存の写真を選ぶことと画像生成を混同せず、生成したと説明しない",
     "- 本文スライドには結論を一文で言い切る takeaway を入れる。文字数の上限を守る",

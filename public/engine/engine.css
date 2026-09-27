@@ -515,6 +515,12 @@
 .hs-item[data-detail] { cursor: pointer; }
 .hs-detail-badge { position: absolute; z-index: 4; width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; background: var(--accent); color: var(--accent-ink); font-size: 26px; box-shadow: 0 6px 18px color-mix(in srgb, var(--accent) 40%, transparent); pointer-events: none; }
 .hs-detail-badge .hs-icon { stroke-width: 2.6; }
+/* Deep-dive pages: the item that opens one wears an arrow; the page itself says where it belongs. */
+.hs-drill-badge { position: absolute; z-index: 4; top: -18px; right: -18px; width: 44px; height: 44px; border-radius: 14px; display: grid; place-items: center; background: var(--ink); color: var(--bg); font-size: 24px; box-shadow: 0 6px 18px color-mix(in srgb, var(--ink) 30%, transparent); pointer-events: none; }
+.hs-drill-badge .hs-icon { stroke-width: 2.6; }
+.hs-editable .hs-drill-badge { pointer-events: auto; cursor: pointer; }
+.hs-live [data-drill] { cursor: pointer; }
+.hs-drill .hs-page { color: var(--accent); font-weight: 700; }
 .hs-popover { position: absolute; z-index: 20; width: 760px; max-height: 760px; overflow: auto; padding: 44px 48px; border-radius: calc(var(--radius) + 6px); background: var(--bg); color: var(--ink); box-shadow: 0 30px 90px rgba(8, 12, 24, .35), 0 0 0 1px var(--line); font-size: 30px; line-height: 1.7; }
 .hs-popover-title { font-family: var(--font-display); font-weight: 800; font-size: 40px; line-height: 1.35; margin-bottom: 18px; color: var(--accent); }
 .hs-popover-close { position: absolute; top: 20px; right: 20px; width: 56px; height: 56px; border: 0; border-radius: 50%; background: var(--surface2); color: var(--ink2); font-size: 30px; display: grid; place-items: center; cursor: pointer; }
@@ -904,6 +910,10 @@
 .hs-grid-cell.is-current .hs-scaler { box-shadow: 0 0 0 3px #8fb6ff; }
 .hs-player-black { position: absolute; inset: 0; z-index: 20; background: #000; }
 .hs-player [hidden] { display: none !important; }
+.hs-player-back { position: absolute; left: 18px; top: 18px; z-index: 8; height: 40px; padding: 0 16px; border: 0; border-radius: 12px; background: rgba(12, 14, 20, .78); backdrop-filter: blur(12px); color: #fff; font: 700 14px/1 inherit; cursor: pointer; box-shadow: 0 10px 40px rgba(0, 0, 0, .35); transition: opacity .35s; }
+.hs-player-back:hover { background: rgba(12, 14, 20, .92); }
+.hs-player-back[hidden] { display: none; }
+.hs-player.idle .hs-player-back { opacity: .35; }
 .hs-player-flash { position: absolute; left: 50%; top: 24px; z-index: 30; transform: translateX(-50%); padding: 10px 18px; border-radius: 10px; background: rgba(12, 14, 20, .9); color: #fff; font-size: 14px; }
 
 @keyframes hs-tr-fade-in { from { opacity: 0; } to { opacity: 1; } }
@@ -922,6 +932,14 @@
 .hs-tr-out-slide.rev { animation-name: hs-tr-slide-out-rev; }
 .hs-tr-in-zoom { animation: hs-tr-zoom-in .6s cubic-bezier(.16, 1, .3, 1) both; z-index: 2; }
 .hs-tr-out-zoom { animation: hs-tr-zoom-out .5s ease both; z-index: 1; }
+@keyframes hs-tr-drill-in { from { opacity: 0; transform: scale(.3); } to { opacity: 1; transform: none; } }
+@keyframes hs-tr-drill-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: scale(1.12); } }
+@keyframes hs-tr-drill-in-rev { from { opacity: 0; transform: scale(1.12); } to { opacity: 1; transform: none; } }
+@keyframes hs-tr-drill-out-rev { from { opacity: 1; transform: none; } to { opacity: 0; transform: scale(.3); } }
+.hs-tr-in-drill { animation: hs-tr-drill-in .55s cubic-bezier(.16, 1, .3, 1) both; transform-origin: var(--ox, 50%) var(--oy, 50%); z-index: 2; }
+.hs-tr-out-drill { animation: hs-tr-drill-out .45s ease both; transform-origin: var(--ox, 50%) var(--oy, 50%); z-index: 1; }
+.hs-tr-in-drill.rev { animation-name: hs-tr-drill-in-rev; z-index: 1; }
+.hs-tr-out-drill.rev { animation-name: hs-tr-drill-out-rev; z-index: 2; }
 /* motion-graphic transitions: a colour band wipes across, or a circle opens from where you clicked */
 /* the incoming slide is clipped from its leading edge, and its colour band rides that edge */
 @keyframes hs-tr-wipe-in { from { clip-path: inset(0 0 0 100%); } to { clip-path: inset(0 0 0 -12%); } }
