@@ -123,6 +123,7 @@ test("app shell, engine, assets and security headers", async () => {
     assert.doesNotMatch(engine, /\/\*__ICONS__\*\/\{\}/, "icons are injected into the engine");
     assert.match(engine, /"bulb":\{"label":/);
     assert.equal((await server.request("/engine/motion.js")).status, 200);
+    assert.equal((await server.request("/saved-library.js")).status, 200);
     assert.match(await (await server.request("/engine/engine.css")).text(), /\.hs-slide/);
     const app = await (await server.request("/app.js")).text();
     assert.doesNotMatch(app, /__APP_VERSION__/);
