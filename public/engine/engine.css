@@ -513,11 +513,34 @@
 /* ------------------------------------------------------------------ details (click for more) */
 
 .hs-item[data-detail] { cursor: pointer; }
-.hs-detail-badge { position: absolute; z-index: 4; width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; background: var(--accent); color: var(--accent-ink); font-size: 26px; box-shadow: 0 6px 18px color-mix(in srgb, var(--accent) 40%, transparent); pointer-events: none; }
-.hs-detail-badge .hs-icon { stroke-width: 2.6; }
+/* What can be clicked says so: "＋ 詳しく" opens a card, "↗ 深掘り" opens a deep-dive page. */
+.hs-detail-badge, .hs-drill-badge { position: absolute; z-index: 4; top: -24px; right: -12px; height: 42px; padding: 0 16px 0 12px; border-radius: 999px; display: inline-flex; align-items: center; gap: 6px; font: 700 20px/1 var(--font-body); letter-spacing: .06em; white-space: nowrap; pointer-events: none; transition: transform .2s var(--ease-out); }
+.hs-detail-badge { background: var(--accent); color: var(--accent-ink); box-shadow: 0 6px 18px color-mix(in srgb, var(--accent) 40%, transparent); }
+.hs-detail-badge .hs-icon, .hs-drill-badge .hs-icon { width: 22px; height: 22px; stroke-width: 2.8; }
+.hs-badge-label { font-weight: 700; }
+.hs-live [data-detail]:hover .hs-detail-badge, .hs-live [data-drill]:hover .hs-drill-badge { transform: scale(1.08); }
+/* On a line of text the mark sits at the end of its own line, and the text keeps clear of it. */
+li[data-detail], li[data-drill] { padding-right: 190px; }
+li > .hs-detail-badge, li > .hs-drill-badge { top: 50%; right: 0; transform: translateY(-50%); }
+.hs-live li[data-detail]:hover > .hs-detail-badge, .hs-live li[data-drill]:hover > .hs-drill-badge { transform: translateY(-50%) scale(1.08); }
+/* When the slide (or the item, on a click build) appears, its marks pulse twice to be noticed. */
+@keyframes hs-badge-pulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--pulse, var(--accent)) 55%, transparent); } 100% { box-shadow: 0 0 0 20px transparent; } }
+.hs-slide.hs-play .hs-detail-badge, .hs-slide [data-g].hs-in .hs-detail-badge, .hs-slide.hs-play .hs-drill-badge, .hs-slide [data-g].hs-in .hs-drill-badge { animation: hs-badge-pulse 1.3s ease-out 1.1s 2; }
+.hs-drill-badge { --pulse: var(--ink); }
+/* Boxes that clip their content keep the mark just inside their corner. */
+.hs-flow-box > .hs-detail-badge, .hs-flow-box > .hs-drill-badge, .hs-hcard > .hs-detail-badge, .hs-hcard > .hs-drill-badge,
+.hs-kpi > .hs-detail-badge, .hs-kpi > .hs-drill-badge, .hs-swot .hs-item > .hs-detail-badge, .hs-swot .hs-item > .hs-drill-badge { top: 14px; right: 14px; }
+/* Inside a box (which may be filled with the accent colour), the mark takes the slide's background with a ring. */
+.hs-flow-box > .hs-detail-badge, .hs-hcard > .hs-detail-badge, .hs-kpi > .hs-detail-badge, .hs-swot .hs-item > .hs-detail-badge { background: var(--bg); color: var(--accent); box-shadow: 0 0 0 2px var(--accent), 0 6px 18px rgba(0, 0, 0, .18); }
+.hs-flow-box > .hs-drill-badge, .hs-hcard > .hs-drill-badge, .hs-kpi > .hs-drill-badge, .hs-swot .hs-item > .hs-drill-badge { background: var(--bg); color: var(--ink); box-shadow: 0 0 0 2px var(--ink), 0 6px 18px rgba(0, 0, 0, .18); }
+/* While presenting, the area that responds to a click is outlined; hovering makes it solid. */
+.hs-live [data-detail]:not(svg):not(svg *), .hs-live [data-drill]:not(svg):not(svg *) { outline: 2px dashed color-mix(in srgb, var(--accent) 45%, transparent); outline-offset: 8px; transition: outline-color .2s; }
+.hs-live li[data-detail], .hs-live li[data-drill], .hs-live tr[data-detail], .hs-live tr[data-drill] { outline-offset: 2px; }
+.hs-live [data-detail]:not(svg):not(svg *):hover, .hs-live [data-drill]:not(svg):not(svg *):hover { outline-style: solid; outline-color: var(--accent); }
+/* On paper nothing can be clicked. */
+.hs-print .hs-detail-badge, .hs-print .hs-drill-badge { display: none; }
 /* Deep-dive pages: the item that opens one wears an arrow; the page itself says where it belongs. */
-.hs-drill-badge { position: absolute; z-index: 4; top: -18px; right: -18px; width: 44px; height: 44px; border-radius: 14px; display: grid; place-items: center; background: var(--ink); color: var(--bg); font-size: 24px; box-shadow: 0 6px 18px color-mix(in srgb, var(--ink) 30%, transparent); pointer-events: none; }
-.hs-drill-badge .hs-icon { stroke-width: 2.6; }
+.hs-drill-badge { background: var(--ink); color: var(--bg); box-shadow: 0 6px 18px color-mix(in srgb, var(--ink) 30%, transparent); }
 .hs-editable .hs-drill-badge { pointer-events: auto; cursor: pointer; }
 .hs-live [data-drill] { cursor: pointer; }
 .hs-drill .hs-page { color: var(--accent); font-weight: 700; }
