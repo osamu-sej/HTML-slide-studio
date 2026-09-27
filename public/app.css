@@ -185,7 +185,7 @@ input[type="color"] { width: 44px; height: 32px; padding: 2px; border: 1px solid
 .connection.ready { border-color: #bfe3cc; background: var(--ok-soft); }
 .connection.error { border-color: #f3c3bd; background: var(--danger-soft); }
 .device-auth { margin-top: 10px; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
-.device-code { padding: 6px 12px; border-radius: 8px; background: var(--ink); color: #fff; font: 800 18px/1 ui-monospace, Menlo, monospace; letter-spacing: .12em; }
+.device-code { padding: 6px 12px; border-radius: 8px; background: var(--ink); color: #fff; font: 800 18px/1 ui-monospace, Menlo, monospace; letter-spacing: .12em; user-select: all; }
 .device-auth a { color: var(--accent-ink); font-weight: 700; }
 .counter { color: var(--muted); font-weight: 600; font-size: 11px; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .counter.over { color: var(--danger); }
