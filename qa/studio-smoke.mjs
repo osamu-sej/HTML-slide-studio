@@ -128,7 +128,7 @@ await step("design dialog + theme switch", async () => {
 });
 
 await step("motion preview", async () => {
-  await page.click(".film-item:nth-child(22)");
+  await page.locator('.film-item:has(.hs-slide[data-type="process"])').first().click();
   await page.click('button:has-text("▶ 動きを確認")');
   await page.waitForTimeout(2600);
   await shot("motion");

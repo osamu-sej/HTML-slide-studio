@@ -50,13 +50,21 @@ export const allLayoutSlides = [
   { type: "closing", title: "次のアクション", message: "10月までに全店展開の計画を確定する" },
 ];
 
+// Body slides take turns between looks (rows, cards, a statement, left and right), as a well-made deck does.
+const BODY = [
+  (title) => ({ type: "content", title, takeaway: "短い結論", points: ["要点A", "要点B"] }),
+  (title) => ({ type: "cards", title, takeaway: "短い結論", items: [{ title: "要点A", desc: "説明A" }, { title: "要点B", desc: "説明B" }] }),
+  (title) => ({ type: "statement", title, text: "判断を**早める**" }),
+  (title) => ({ type: "compare", title, takeaway: "短い結論", leftTitle: "現状", rightTitle: "目指す姿", leftItems: ["手作業"], rightItems: ["自動化"] }),
+];
+
 export const shortDeck = (count = 5) => ({
   deckTitle: "テスト資料",
   purpose: "検証",
   audience: "役員",
   slideData: [
     { type: "title", title: "テスト資料" },
-    ...Array.from({ length: count - 2 }, (_, i) => ({ type: "content", title: `本文${i + 1}`, takeaway: "短い結論", points: ["要点A", "要点B"] })),
+    ...Array.from({ length: count - 2 }, (_, i) => BODY[i % BODY.length](`本文${i + 1}`)),
     { type: "closing", title: "次のアクション", message: "来週までに決める" },
   ],
 });

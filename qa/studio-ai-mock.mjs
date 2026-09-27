@@ -16,7 +16,8 @@ const outDir = join(root, "qa", "out");
 await mkdir(outDir, { recursive: true });
 
 const sample = JSON.parse(await readFile(join(root, "public", "samples", "ai-rollout.json"), "utf8"));
-const pick = [0, 1, 4, 6, 7, 21, 18, 42, 45].map((i) => sample.slideData[i]);
+const first = (type) => sample.slideData.find((slide) => slide.type === type);
+const pick = ["title", "executiveSummary", "kpi", "waterfall", "imageText", "process", "roadmap", "statement", "closing"].map(first);
 const generated = { deckTitle: sample.deckTitle, purpose: sample.purpose, audience: sample.audience, slideData: pick };
 const outline = {
   deckTitle: sample.deckTitle,
@@ -83,7 +84,16 @@ await step("outline", async () => {
   await page.fill("#briefInput", "生成AIの試行結果を役員に報告し、全社展開の予算承認をもらいたい。");
   await page.click("#askChatGptBtn");
   await page.waitForSelector("#outlinePanel:not(.hidden) .outline-item", { timeout: 10000 });
+  // The mock outline puts a process and a roadmap side by side: both are lines across the slide.
+  const note = await page.textContent("#outlineVariety:not(.hidden)", { timeout: 3000 });
+  if (!/6枚目と7枚目が、どちらも「横に並ぶ流れ」/.test(note)) throw new Error(`variety note: ${note}`);
+  const groups = await page.$eval(".outline-item select", (select) => [...select.querySelectorAll("optgroup")].map((group) => group.label));
+  if (!groups.includes("横に並ぶ流れ") || !groups.includes("図形")) throw new Error(`layout groups: ${groups}`);
   await shot("outline");
+  // Choosing a different look for the roadmap clears the note.
+  await page.selectOption(".outline-item:nth-child(7) select", "checklist");
+  await page.waitForSelector("#outlineVariety.hidden", { state: "attached", timeout: 3000 });
+  await page.selectOption(".outline-item:nth-child(7) select", "roadmap");
 });
 
 await step("generate from the outline", async () => {
