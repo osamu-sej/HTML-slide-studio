@@ -110,6 +110,96 @@ test("photos and videos: slots, placement, YouTube and browser-kept files", asyn
   assert.equal(E.youtubeId("https://youtu.be/dQw4w9WgXcQ"), "dQw4w9WgXcQ");
 });
 
+test("motion graphics: kinetic type and backdrops by default, per deck and per slide", async () => {
+  const { E } = await loadEngine();
+  const slides = [
+    { type: "title", title: "表紙" },
+    { type: "section", title: "章" },
+    { type: "content", title: "本文", takeaway: "結論", points: ["A", "B"] },
+    { type: "hero", title: "全面写真", visualAsset: "ai" },
+    { type: "closing", message: "以上" },
+  ];
+  const plain = deckOf(slides);
+  const cover = E.render(slides[0], { deck: plain, index: 0, mode: "present" });
+  assert.equal(cover.dataset.kinetic, "mask", "big lines move by default");
+  assert.equal(cover.dataset.backdrop, undefined, "no backdrop unless chosen");
+  assert.ok(cover.querySelector(".hs-cover-art"), "the theme's cover art stays");
+  assert.equal(cover.dataset.draw, "on");
+  assert.equal(E.render(slides[2], { deck: plain, index: 2, mode: "present" }).dataset.kinetic, undefined, "body slides keep their titles still");
+
+  const moving = deckOf(slides, { motion: { kinetic: "type", backdrop: "orbits", draw: false } });
+  const title = E.render(slides[0], { deck: moving, index: 0, mode: "present" });
+  assert.equal(title.dataset.kinetic, "type");
+  assert.ok(title.querySelector('.hs-decor .hs-bd[data-bd="orbits"] .hs-bd-sat'), "satellites on their orbits");
+  assert.equal(title.querySelector(".hs-cover-art"), null, "the backdrop replaces the cover art");
+  assert.equal(title.dataset.draw, "off");
+  assert.equal(E.render(slides[1], { deck: moving, index: 1, mode: "present" }).dataset.backdrop, "orbits");
+  assert.equal(E.render(slides[2], { deck: moving, index: 2, mode: "present" }).dataset.backdrop, undefined, "the deck's backdrop stays on stage slides");
+  assert.equal(E.render(slides[3], { deck: moving, index: 3, mode: "present" }).dataset.backdrop, undefined, "a full-bleed photo is its own backdrop");
+
+  const own = E.render({ ...slides[2], kinetic: "chars", backdrop: "waves" }, { deck: moving, index: 2, mode: "present" });
+  assert.equal(own.dataset.kinetic, "chars");
+  assert.equal(own.dataset.backdrop, "waves");
+  const off = E.render({ ...slides[1], kinetic: "none", backdrop: "none" }, { deck: moving, index: 1, mode: "present" });
+  assert.equal(off.dataset.kinetic, undefined);
+  assert.equal(off.querySelector(".hs-bd"), null);
+
+  for (const kind of Object.keys(E.BACKDROPS)) {
+    const a = E.render({ ...slides[1], backdrop: kind }, { deck: plain, index: 1, mode: "thumb" });
+    const b = E.render({ ...slides[1], backdrop: kind }, { deck: plain, index: 1, mode: "present" });
+    assert.ok(a.querySelector(`.hs-bd[data-bd="${kind}"]`).children.length > 0, `${kind} draws something`);
+    assert.equal(a.querySelector(".hs-bd").outerHTML, b.querySelector(".hs-bd").outerHTML, `${kind}: thumbnails match the presentation`);
+  }
+  const icon = E.render({ type: "cards", title: "t", takeaway: "k", items: [{ title: "A", icon: "rocket" }] }, { deck: plain, index: 2, mode: "present" }).querySelector(".hs-icon");
+  assert.ok([...icon.children].every((shape) => shape.getAttribute("pathLength") === "1"), "icon strokes can draw themselves");
+});
+
+test("kinetic type splits the big lines without changing their text or line-break rules", async () => {
+  const { E } = await loadEngine();
+  const slide = { type: "statement", title: "目指すこと", text: "毎月**1,440時間**を、考える仕事へ。AI活用" };
+  const deck = deckOf([{ type: "title", title: "t" }, slide, { type: "closing" }]);
+  for (const mode of ["mask", "words", "chars", "type"]) {
+    const el = E.render({ ...slide, kinetic: mode }, { deck, index: 1, mode: "present" });
+    const text = el.querySelector(".hs-statement-text");
+    const before = text.textContent;
+    E.play(el);
+    const units = [...text.querySelectorAll(".hs-k")];
+    assert.ok(text.classList.contains("hs-kin"), mode);
+    assert.equal(text.textContent, before, `${mode}: the words stay the same`);
+    assert.ok(units.length > 3, `${mode}: split into units`);
+    assert.ok(!units.some((unit) => /^[、。]/.test(unit.textContent)), `${mode}: no unit starts with 、 or 。`);
+    assert.ok(text.querySelector(".hs-em .hs-k"), `${mode}: the emphasis keeps its marker`);
+    assert.match(text.style.getPropertyValue("--kst"), /^\d+ms$/);
+    assert.equal(units.at(-1).classList.contains("hs-k-last"), true);
+    if (mode === "mask") assert.ok(text.querySelector(".hs-km > .hs-k"), "mask: each unit rises from behind its own edge");
+    if (mode === "chars") assert.deepEqual([...text.querySelectorAll(".hs-kw")].map((word) => word.textContent), ["1,440", "AI"], "chars: Latin words and figures do not break");
+    E.play(el);
+    assert.equal(text.querySelectorAll(".hs-k").length, units.length, `${mode}: playing again does not split twice`);
+  }
+});
+
+test("Lottie animations: a player box when shown, a badge in thumbnails", async () => {
+  const { E } = await loadEngine();
+  const slides = [
+    { type: "title", title: "表紙" },
+    { type: "cards", title: "動き", takeaway: "結論", items: [{ title: "A" }], media: { src: "idb:lot", kind: "lottie", name: "rocket.json", placement: { x: 0.5, y: 0.2, w: 0.3, h: 0.4 } } },
+    { type: "closing" },
+  ];
+  const deck = deckOf(slides);
+  const desc = E.mediaOf(slides[1]);
+  assert.equal(desc.kind, "lottie");
+  assert.equal(desc.fit, "contain", "animations are shown whole by default");
+  assert.equal(E.mediaOf({ media: { src: "https://lottie.host/a/b.json" } }).kind, "lottie");
+  const live = E.render(slides[1], { deck, index: 1, mode: "present", mediaUrls: { "idb:lot": "blob:lottie" } });
+  const host = live.querySelector(".hs-placed.hs-lottie .hs-lottie-host");
+  assert.equal(host.dataset.src, "blob:lottie");
+  assert.ok(host.hasAttribute("data-autoplay") && host.hasAttribute("data-loop"));
+  const thumb = E.render(slides[1], { deck, index: 1, mode: "thumb", mediaUrls: { "idb:lot": "blob:lottie" } });
+  assert.equal(thumb.querySelector(".hs-lottie-host"), null);
+  assert.match(thumb.querySelector(".hs-lottie-badge").textContent, /rocket/);
+  assert.equal(typeof E.mountLottie, "function");
+});
+
 test("deck-wide design: accent colour, motion switches and theme fonts", async () => {
   const { E } = await loadEngine();
   const deck = deckOf(allLayoutSlides.slice(0, 3), { theme: "editorial", accent: "#123456", motion: { entrance: "blur", hover: "focus", numbers: false, ambient: false } });

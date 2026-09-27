@@ -54,6 +54,138 @@
     setTimeout(() => els.forEach((el) => countUp(el)), delay);
   }
 
+  // ---------------------------------------------------------------- kinetic type
+
+  // The big lines of a slide: cover, chapter, hero, statement and closing text, and a titled slide's title.
+  const KINETIC_TARGETS = ".hs-cover-title, .hs-section-title, .hs-hero-title, .hs-statement-text, .hs-closing-message, .hs-closing-title, .hs-frame > .hs-head > .hs-title";
+  // Characters that may not start a line ride with the unit before; opening brackets ride with the unit after.
+  const NO_START = /^[、。，．,.)）」』】〕〉》！？!?:：;；ー〜…‥・ぁぃぅぇぉっゃゅょゎァィゥェォッャュョヮヵヶ々ゝゞ%％]+$/u;
+  const NO_END = /^[(（「『【〔〈《]+$/u;
+  const BUDGET = { mask: [900, 70], words: [1000, 90], chars: [1100, 45], type: [1700, 60], scramble: [1300, 55] };
+
+  function segments(text, granularity) {
+    try { return [...new Intl.Segmenter("ja", { granularity }).segment(text)].map((part) => part.segment); } catch { return Array.from(text); }
+  }
+
+  /** Text → units to animate ({ space } keeps spaces and line breaks as they are). */
+  function unitsOf(text, mode) {
+    const units = [];
+    let carry = "";
+    for (const part of segments(text, mode === "mask" || mode === "words" ? "word" : "grapheme")) {
+      if (/^\s+$/.test(part)) {
+        if (carry) { units.push(carry); carry = ""; }
+        units.push({ space: part });
+        continue;
+      }
+      if (NO_END.test(part)) { carry += part; continue; }
+      const piece = carry + part;
+      carry = "";
+      if (NO_START.test(part) && typeof units[units.length - 1] === "string") units[units.length - 1] += piece;
+      else units.push(piece);
+    }
+    if (carry) units.push(carry);
+    return units;
+  }
+
+  /** Wrap every unit of `el`'s text in a span (inside <em> too). Returns the number of units. */
+  function splitKinetic(el, mode) {
+    if (el.classList.contains("hs-kin")) return el.querySelectorAll(".hs-k").length;
+    const doc = el.ownerDocument;
+    const perChar = mode === "chars" || mode === "type" || mode === "scramble";
+    let n = 0;
+    const wrap = (text) => {
+      const frag = doc.createDocumentFragment();
+      let word = null; // Latin words stay unbroken when split per character
+      for (const unit of unitsOf(text, mode)) {
+        if (typeof unit !== "string") { word = null; frag.append(unit.space); continue; }
+        const k = doc.createElement("span");
+        k.className = "hs-k";
+        k.textContent = unit;
+        k.style.setProperty("--k", String(n));
+        n += 1;
+        let node = k;
+        if (mode === "mask") { node = doc.createElement("span"); node.className = "hs-km"; node.append(k); }
+        if (perChar && /^[A-Za-z0-9.,:%+\-]+$/.test(unit)) {
+          if (!word) { word = doc.createElement("span"); word.className = "hs-kw"; frag.append(word); }
+          word.append(node);
+        } else {
+          word = null;
+          frag.append(node);
+        }
+      }
+      return frag;
+    };
+    const walk = (node) => {
+      for (const child of [...node.childNodes]) {
+        if (child.nodeType === 3) { if (child.data) child.replaceWith(wrap(child.data)); }
+        else if (child.nodeType === 1 && child.namespaceURI === "http://www.w3.org/1999/xhtml" && !child.classList.contains("hs-detail-badge")) walk(child);
+      }
+    };
+    walk(el);
+    el.classList.add("hs-kin");
+    return n;
+  }
+
+  /** Split the slide's big lines and time them (called by play()). */
+  function kinetic(slide) {
+    const mode = slide.dataset.kinetic;
+    if (!BUDGET[mode]) return;
+    for (const el of slide.querySelectorAll(KINETIC_TARGETS)) {
+      const n = splitKinetic(el, mode);
+      if (!n) continue;
+      const [budget, cap] = BUDGET[mode];
+      const d = parseFloat(el.style.getPropertyValue("--d")) || 0;
+      el.style.setProperty("--kst", `${Math.round(Math.min(cap, budget / n))}ms`);
+      el.style.setProperty("--kd", `${Math.round(el.classList.contains("hs-enter") ? d * 90 + 120 : 60)}ms`);
+      el.style.setProperty("--kn", String(n));
+      const units = el.querySelectorAll(".hs-k");
+      units[units.length - 1]?.classList.add("hs-k-last");
+    }
+    if (mode === "scramble") scramble(slide);
+  }
+
+  const GLYPHS = {
+    wide: "アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワン",
+    upper: "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+    lower: "abcdefghijklmnopqrstuvwxyz",
+    digit: "0123456789",
+  };
+  const poolOf = (ch) => (/[぀-ヿ㐀-鿿！-～]/u.test(ch) ? GLYPHS.wide : /[A-Z]/.test(ch) ? GLYPHS.upper : /[a-z]/.test(ch) ? GLYPHS.lower : /\d/.test(ch) ? GLYPHS.digit : null);
+
+  /** "Decode": each unit flickers through random glyphs of its own kind, then settles, left to right. */
+  function scramble(slide) {
+    const units = [...slide.querySelectorAll(".hs-kin .hs-k")].map((el) => {
+      el.classList.remove("on", "done");
+      const host = el.closest(".hs-kin");
+      const at = (parseFloat(host.style.getPropertyValue("--kd")) || 0) + Number(el.style.getPropertyValue("--k") || 0) * (parseFloat(host.style.getPropertyValue("--kst")) || 50);
+      if (el.dataset.t == null) el.dataset.t = el.textContent;
+      const text = el.dataset.t;
+      return { el, text, chars: Array.from(text), at, until: at + 420, swapped: 0 };
+    });
+    if (!units.length) return;
+    const start = performance.now();
+    const finish = () => { for (const u of units) { u.el.textContent = u.text; u.el.classList.remove("on"); u.el.classList.add("done"); } };
+    const last = Math.max(...units.map((u) => u.until));
+    const safety = setTimeout(finish, last + 1500);
+    const tick = (now) => {
+      if (!slide.isConnected) { clearTimeout(safety); return; }
+      const t = now - start;
+      for (const u of units) {
+        if (u.el.classList.contains("done")) continue;
+        if (t >= u.until) { u.el.textContent = u.text; u.el.classList.remove("on"); u.el.classList.add("done"); continue; }
+        if (t < u.at) continue;
+        u.el.classList.add("on");
+        if (now - u.swapped > 55) {
+          u.swapped = now;
+          u.el.textContent = u.chars.map((ch) => { const pool = poolOf(ch); return pool ? pool[Math.floor(Math.random() * pool.length)] : ch; }).join("");
+        }
+      }
+      if (t < last) requestAnimationFrame(tick);
+      else { clearTimeout(safety); finish(); }
+    };
+    requestAnimationFrame(tick);
+  }
+
   // ---------------------------------------------------------------- entrance & builds
 
   const stepsOf = (slide) => Number(slide.dataset.steps || 0);
@@ -67,6 +199,7 @@
       el.classList.toggle("hs-hidden", click && Number(el.dataset.g) >= step);
     }
     if (!animate || reduced()) return;
+    kinetic(slide);
     void slide.offsetWidth;
     slide.classList.add("hs-play");
     if (click) {
@@ -85,6 +218,73 @@
     }
   }
 
+  // ---------------------------------------------------------------- Lottie (motion graphics made in After Effects, LottieFiles…)
+
+  // The studio points this at its copy of lottie-web; exported files carry the library inline instead.
+  let lottieLoading = null;
+  function lottieLib(doc) {
+    const win = doc.defaultView || root;
+    if (win.lottie) return Promise.resolve(win.lottie);
+    if (!E.lottieUrl) return Promise.reject(new Error("Lottie のプレーヤーがありません"));
+    if (!lottieLoading) {
+      lottieLoading = new Promise((resolve, reject) => {
+        const script = doc.createElement("script");
+        script.src = E.lottieUrl;
+        script.async = true;
+        script.onload = () => (win.lottie ? resolve(win.lottie) : reject(new Error("Lottie を読み込めません")));
+        script.onerror = () => { lottieLoading = null; reject(new Error("Lottie を読み込めません")); };
+        doc.head.append(script);
+      });
+    }
+    return lottieLoading;
+  }
+
+  const lottieFiles = new Map();
+  function lottieJson(url) {
+    if (!lottieFiles.has(url)) {
+      lottieFiles.set(url, fetch(url).then((response) => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return response.json();
+      }).catch((error) => { lottieFiles.delete(url); throw error; }));
+    }
+    return lottieFiles.get(url);
+  }
+
+  /**
+   * Load every Lottie animation in `scope`. play: start the ones set to autoplay (presentations);
+   * otherwise hold one frame (`frame` 0–1 of the animation) — the editor, prints and reduced motion.
+   */
+  function mountLottie(scope, { play = true, frame = 0.5 } = {}) {
+    const hosts = [...scope.querySelectorAll(".hs-lottie-host")];
+    return Promise.all(hosts.map(async (host) => {
+      try {
+        if (!host.hsAnim) {
+          const [lib, data] = await Promise.all([lottieLib(host.ownerDocument), lottieJson(host.dataset.src)]);
+          if (!host.isConnected || host.hsAnim) return;
+          host.hsAnim = lib.loadAnimation({
+            container: host, renderer: "svg", loop: host.hasAttribute("data-loop"), autoplay: false,
+            animationData: typeof structuredClone === "function" ? structuredClone(data) : JSON.parse(JSON.stringify(data)),
+            rendererSettings: { preserveAspectRatio: host.dataset.fit === "cover" ? "xMidYMid slice" : "xMidYMid meet" },
+          });
+        }
+        const anim = host.hsAnim;
+        if (play && !reduced() && host.hasAttribute("data-autoplay")) { anim.goToAndPlay(0, true); return; }
+        const hold = () => anim.goToAndStop(Math.max(0, Math.round(frame * (anim.totalFrames - 1))), true);
+        if (anim.isLoaded) hold();
+        else anim.addEventListener("DOMLoaded", hold);
+      } catch {
+        host.classList.add("hs-lottie-failed");
+      }
+    }));
+  }
+
+  function stopLottie(scope) {
+    for (const host of scope.querySelectorAll(".hs-lottie-host")) {
+      try { host.hsAnim?.destroy(); } catch { /* already gone */ }
+      host.hsAnim = null;
+    }
+  }
+
   // ---------------------------------------------------------------- media
 
   function playMedia(slide, { sound = false } = {}) {
@@ -97,11 +297,13 @@
       frame.addEventListener("load", send, { once: true });
       send();
     }
+    mountLottie(slide, { play: true, frame: 0 });
   }
 
   function stopMedia(slide) {
     for (const video of slide.querySelectorAll("video")) { try { video.pause(); } catch { /* detached */ } }
     for (const frame of slide.querySelectorAll("iframe")) frame.contentWindow?.postMessage(JSON.stringify({ event: "command", func: "pauseVideo", args: [] }), "*");
+    stopLottie(slide);
   }
 
   // ---------------------------------------------------------------- interaction (hover, tooltips, details, parallax)
@@ -212,6 +414,12 @@
         event.stopPropagation();
         if (video.paused) { video.muted = video.hasAttribute("data-muted"); video.play().catch(() => {}); } else video.pause();
       }
+      // A Lottie animation that does not play by itself starts (or pauses) on click.
+      const anim = event.target.closest?.(".hs-lottie-host")?.hsAnim;
+      if (anim && !event.target.closest(".hs-lottie-host").hasAttribute("data-autoplay")) {
+        event.stopPropagation();
+        if (anim.isPaused) anim.play(); else anim.pause();
+      }
       if (event.target.closest?.("iframe, .hs-popover")) event.stopPropagation();
     };
     slide.addEventListener("pointerover", onOver);
@@ -246,7 +454,8 @@
 
   // ---------------------------------------------------------------- player
 
-  const TRANSITIONS = new Set(["none", "fade", "slide", "zoom", "morph"]);
+  const TRANSITIONS = new Set(["none", "fade", "slide", "zoom", "morph", "wipe", "circle"]);
+  const TRANSITION_MS = { wipe: 920, circle: 920 };
 
   /**
    * A presentation in `host` (the studio's presenter overlay or an exported file's body).
@@ -266,6 +475,7 @@
     let busy = null;
     let pv = null;
     let gesture = false;
+    let origin = null;
     const started = Date.now();
 
     const stage = h("div", { class: "hs-player-stage" });
@@ -350,12 +560,31 @@
         E.scale(next);
         current = next;
         const suffix = dir < 0 ? " rev" : "";
-        next.className += ` hs-tr-in-${type}${suffix}`;
+        // Wipe and circle clip the incoming slide itself, so the edge, its colour band and the click point
+        // share the slide's own coordinates (letterboxing never shows them).
+        const entering = type === "wipe" || type === "circle" ? slide : next;
+        let band = null;
+        if (type === "circle") {
+          const box = slide.getBoundingClientRect();
+          const at = origin && box.width ? { x: ((origin.x - box.left) / box.width) * 100, y: ((origin.y - box.top) / box.height) * 100 } : { x: 50, y: 50 };
+          slide.style.setProperty("--cx", `${Math.round(at.x)}%`);
+          slide.style.setProperty("--cy", `${Math.round(at.y)}%`);
+        }
+        if (type === "wipe") {
+          const tone = win.getComputedStyle(slide);
+          band = h("div", { class: `hs-tr-band${suffix}` });
+          band.style.setProperty("--band", tone.getPropertyValue("--accent").trim() || "#2451e6");
+          band.style.setProperty("--band2", tone.getPropertyValue("--accent2").trim() || "#13a89e");
+          slide.append(band);
+        }
+        origin = null;
+        entering.className += ` hs-tr-in-${type}${suffix}`;
         prevScaler.className += ` hs-tr-out-${type}${suffix}`;
         enter();
-        busy = new Promise((resolve) => setTimeout(resolve, 620)).then(() => {
+        busy = new Promise((resolve) => setTimeout(resolve, TRANSITION_MS[type] ?? 620)).then(() => {
           prevScaler.remove();
-          next.classList.remove(`hs-tr-in-${type}`, "rev");
+          band?.remove();
+          entering.classList.remove(`hs-tr-in-${type}`, "rev");
           busy = null;
         });
       }
@@ -503,6 +732,7 @@
     const onStageClick = (event) => {
       if (event.target.closest(".hs-player-bar, .hs-player-grid, .hs-player-notes")) return;
       gesture = true;
+      origin = { x: event.clientX, y: event.clientY };
       next();
     };
     let touchX = null;
@@ -556,5 +786,5 @@ html,body{margin:0;height:100%;background:#0d1017;color:#e8ecf4;font-family:"Not
 .pv-notes{grid-row:2;grid-column:1/-1;overflow:auto;padding:16px 20px;border-radius:10px;background:#161b26;font-size:22px;line-height:1.75;white-space:pre-wrap}
 .pv .hs-slide{position:absolute;top:0;left:0}`;
 
-  Object.assign(E, { play, reveal, stepsOf, countUp, activate, playMedia, stopMedia, createPlayer, engineCss });
+  Object.assign(E, { play, reveal, stepsOf, countUp, activate, playMedia, stopMedia, mountLottie, stopLottie, splitKinetic, createPlayer, engineCss });
 })(typeof window !== "undefined" ? window : globalThis);

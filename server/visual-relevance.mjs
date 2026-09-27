@@ -16,7 +16,7 @@ const PHOTO_TOPICS = {
 };
 
 export function slideMeaning(slide) {
-  const skip = new Set(["type", "notes", "customImage", "imagePlacement", "image", "visualAsset", "icon", "animation", "photoMotion", "media", "details", "date"]);
+  const skip = new Set(["type", "notes", "customImage", "imagePlacement", "image", "visualAsset", "icon", "animation", "photoMotion", "kinetic", "backdrop", "media", "details", "date"]);
   const parts = [];
   const visit = (value, key = "") => {
     if (skip.has(key) || value == null) return;

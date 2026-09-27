@@ -22,10 +22,10 @@ export const placementSchema = z.object({
   x: z.number().min(0).max(1), y: z.number().min(0).max(1),
   w: z.number().min(0.05).max(1), h: z.number().min(0.05).max(1),
 });
-/** A photo or video the user added (never written by the AI): a data URL, a video kept in the browser (idb:…), or a web address. */
+/** A photo, video or Lottie animation the user added (never written by the AI): a data URL, a file kept in the browser (idb:…), or a web address. */
 export const mediaSchema = z.object({
   src: z.string().min(1).max(3_000_000),
-  kind: z.enum(["image", "video"]).optional(),
+  kind: z.enum(["image", "video", "lottie"]).optional(),
   name: z.string().max(200).optional(),
   fit: z.enum(["cover", "contain"]).optional(),
   autoplay: z.boolean().optional(),
@@ -39,6 +39,14 @@ export const iconSchema = z.enum(Object.keys(ICONS));
 export const animationSchema = z.enum(["auto", "none", "fade", "cascade", "click"]);
 // Motion on the slide's photo while it is shown.
 export const photoMotionSchema = z.enum(["none", "zoom", "pan", "float", "parallax"]);
+// Motion graphics (see KINETIC and BACKDROPS in public/engine/engine.js): how the big text sets itself in motion,
+// and the moving graphic behind the slide. "auto" follows the deck (cover, chapters, statements, the close).
+export const KINETIC_STYLES = ["mask", "words", "chars", "type", "scramble"];
+export const BACKDROP_KINDS = ["particles", "waves", "grid", "orbits", "gradient", "lines", "shapes"];
+export const kineticSchema = z.enum(["auto", "none", ...KINETIC_STYLES]);
+export const backdropSchema = z.enum(["auto", "none", ...BACKDROP_KINDS]);
+export const TRANSITIONS = ["none", "fade", "slide", "zoom", "morph", "wipe", "circle"];
+export const transitionSchema = z.enum(TRANSITIONS);
 // Presentations only: text that opens when an item ("items[0]", "steps[2]") is clicked.
 export const detailSchema = z.object({
   target: z.string().min(1).max(30),
@@ -53,6 +61,8 @@ const shared = {
   media: mediaSchema.optional(),
   photoMotion: photoMotionSchema.optional(),
   animation: animationSchema.optional(),
+  kinetic: kineticSchema.optional(),
+  backdrop: backdropSchema.optional(),
   notes: notesSchema,
 };
 export const titledShape = {
@@ -141,6 +151,9 @@ export const deckMotionSchema = z.object({
   hover: z.enum(["lift", "focus", "none"]).optional(),
   numbers: z.boolean().optional(),
   ambient: z.boolean().optional(),
+  kinetic: z.enum(["none", ...KINETIC_STYLES]).optional(),
+  backdrop: z.enum(["none", ...BACKDROP_KINDS]).optional(),
+  draw: z.boolean().optional(),
 });
 
 export const defaultSettings = studioSettingsSchema.parse({});
@@ -157,7 +170,7 @@ export const deckShape = z.object({
   schemaVersion: z.string().max(20).optional().default("3.0"),
   theme: themeSchema.optional().default("clarity"),
   accent: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
-  transition: z.enum(["none", "fade", "slide", "zoom", "morph"]).optional().default("fade"),
+  transition: transitionSchema.optional().default("fade"),
   motion: deckMotionSchema.optional(),
   // Standing instructions for every AI request on this deck ("役員向け", "数値は9月時点"…).
   memo: z.string().max(2000).optional().default(""),
@@ -203,7 +216,9 @@ export const chatResultSchema = z.object({
   order: z.array(z.number().int().min(1).max(50)).max(50).optional(),
   deckTitle: z.string().max(100).optional(),
   theme: themeSchema.optional(),
-  transition: z.enum(["none", "fade", "slide", "zoom", "morph"]).optional(),
+  transition: transitionSchema.optional(),
+  // Deck-wide motion graphics, only when asked ("全体をもっと動かして", "表紙と章扉に動く背景を").
+  motion: z.object({ kinetic: z.enum(["none", ...KINETIC_STYLES]).optional(), backdrop: z.enum(["none", ...BACKDROP_KINDS]).optional(), draw: z.boolean().optional() }).optional(),
   suggestions: z.array(z.string().min(1).max(60)).max(3),
 });
 

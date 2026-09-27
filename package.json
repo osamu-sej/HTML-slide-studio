@@ -10,13 +10,15 @@
     "test": "node --test test/*.test.js",
     "test:py": "python3 -m unittest discover -s test -p \"test_*.py\"",
     "qa": "node qa/shoot.mjs",
-    "qa:studio": "node qa/studio-smoke.mjs"
+    "qa:studio": "node qa/studio-smoke.mjs",
+    "qa:motion": "node qa/studio-motion.mjs"
   },
   "engines": {
     "node": ">=20"
   },
   "dependencies": {
     "@openai/codex": "0.144.1",
+    "lottie-web": "5.13.0",
     "zod": "^3.25.76",
     "zod-to-json-schema": "^3.25.1"
   },

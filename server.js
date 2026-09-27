@@ -95,6 +95,9 @@ function loadStatic() {
   add("/engine/engine.css", readFileSync(join(PUBLIC, "engine", "engine.css"), "utf8"), TYPES[".css"]);
   for (const name of readdirSync(join(PUBLIC, "assets")).filter((n) => /^[a-z0-9-]+\.jpg$/.test(n))) add(`/assets/${name}`, readFileSync(join(PUBLIC, "assets", name)), TYPES[".jpg"]);
   for (const name of readdirSync(join(PUBLIC, "samples")).filter((n) => /^[a-z0-9-]+\.json$/.test(n))) add(`/samples/${name}`, readFileSync(join(PUBLIC, "samples", name)), TYPES[".json"]);
+  // Lottie player (lottie-web, MIT) for motion-graphic animations: the light SVG build, no eval, no workers.
+  const lottie = join(here, "node_modules", "lottie-web", "build", "player", "lottie_light.min.js");
+  if (existsSync(lottie)) add("/vendor/lottie.js", readFileSync(lottie), TYPES[".js"]);
   return files;
 }
 const staticFiles = loadStatic();
@@ -424,6 +427,9 @@ function startChatJob(session, request) {
       const title = answer.deckTitle?.trim() && answer.deckTitle.trim() !== deck.title ? answer.deckTitle.trim() : null;
       const theme = answer.theme && answer.theme !== deck.theme ? answer.theme : null;
       const transition = answer.transition && answer.transition !== deck.transition ? answer.transition : null;
+      // Deck-wide motion graphics: keep only what actually changes.
+      const motionPatch = Object.fromEntries(Object.entries(answer.motion ?? {}).filter(([key, value]) => value != null && value !== (deck.motion ?? {})[key]));
+      const motion = Object.keys(motionPatch).length ? motionPatch : null;
       const result = {
         chat: {
           reply: warnings.length ? `${applied.changed ? "文章・構成の修正案は用意しました。" : "画像の変更は提案していません。"}\n${warnings.join("\n")}` : answer.reply,
@@ -431,8 +437,9 @@ function startChatJob(session, request) {
           deckTitle: title,
           theme,
           transition,
-          changed: applied.changed || Boolean(title || theme || transition),
-          summary: [summarizeChange(applied), title ? "資料名を変更" : "", theme ? "テーマを変更" : "", transition ? "切り替えを変更" : ""].filter(Boolean).join("・"),
+          motion,
+          changed: applied.changed || Boolean(title || theme || transition || motion),
+          summary: [summarizeChange(applied), title ? "資料名を変更" : "", theme ? "テーマを変更" : "", transition ? "切り替えを変更" : "", motion ? "動きを変更" : ""].filter(Boolean).join("・"),
           slides: applied.changed ? applied.slides : null,
           items: applied.items,
           deleted: applied.deleted,
@@ -529,13 +536,13 @@ async function withExtractSlot(task) {
   }
 }
 
-// Fonts (Google Fonts) and YouTube embeds are the only outside resources a presentation uses.
+// Fonts (Google Fonts), YouTube embeds and Lottie files from LottieFiles are the only outside resources a presentation uses.
 const CSP = [
   "default-src 'self'",
   "script-src 'self' 'unsafe-inline'",
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   "font-src 'self' https://fonts.gstatic.com data:",
-  "connect-src 'self'",
+  "connect-src 'self' blob: data: https://lottie.host https://*.lottiefiles.com",
   "img-src 'self' data: blob: https:",
   "media-src 'self' data: blob: https:",
   "frame-src https://www.youtube-nocookie.com https://www.youtube.com",
