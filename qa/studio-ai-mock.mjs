@@ -38,6 +38,7 @@ const variants = [
 ];
 
 const jobs = new Map();
+const imageRequests = [];
 let next = 1;
 const newJob = (result, partials = []) => {
   const id = `00000000-0000-4000-8000-${String(next++).padStart(12, "0")}`;
@@ -55,6 +56,13 @@ page.on("console", (message) => { if (message.type() === "error" && !/ERR_TUNNEL
 await page.route("**/api/codex/status", (route) => route.fulfill({ json: { available: true, authorized: true, authenticated: true, planType: "test", team: false, fallback: { available: false, model: "gemma4:12b", web: false, reason: "" } } }));
 await page.route("**/api/decks/outline", (route) => route.fulfill({ status: 202, json: { jobId: newJob({ kind: "outline", outline }) } }));
 await page.route(/\/api\/decks$/, (route) => route.fulfill({ status: 202, json: { jobId: newJob({ kind: "deck", deck: generated, detail: `${pick.length}枚の構成が完成しました。` }, [3, 6]) } }));
+await page.route("**/api/decks/image", async (route) => {
+  const request = route.request().postDataJSON();
+  imageRequests.push(request.index);
+  const jobId = newJob({ kind: "image", image: { url: "/api/decks/mock/image", mime: "image/jpeg" } });
+  await route.fulfill({ status: 202, json: { jobId } });
+});
+await page.route("**/api/decks/mock/image", async (route) => route.fulfill({ status: 200, contentType: "image/jpeg", body: await readFile(join(root, "public", "assets", "data-insight.jpg")) }));
 await page.route("**/api/decks/chat", (route) => route.fulfill({ status: 202, json: { jobId: newJob({ kind: "chat", chat }) } }));
 await page.route("**/api/decks/variants", (route) => route.fulfill({ status: 202, json: { jobId: newJob({ kind: "variants", variants }) } }));
 await page.route("**/api/decks/revise", (route) => route.fulfill({ status: 503, json: { error: "テストでは作り直しません" } }));
@@ -102,7 +110,18 @@ await step("generate from the outline", async () => {
   await page.waitForTimeout(1500);
   const theme = await page.getAttribute(".slide-wrap .hs-slide", "data-theme");
   if (theme !== "aurora") throw new Error(`theme was ${theme}`);
+  await page.waitForFunction(() => document.querySelector("#autoImageStatus")?.textContent?.includes("画像 5/9枚"), null, { timeout: 15000 });
+  if (imageRequests.length !== 5) throw new Error(`automatic images: ${imageRequests.length} instead of 5`);
   await shot("generated");
+  await page.click(".film-item:nth-child(2)");
+  await shot("generated-evidence");
+  await page.click(".film-item:nth-child(3)");
+  await shot("generated-kpi");
+  await page.click(".film-item:nth-child(1)");
+  await page.reload();
+  await page.waitForFunction(() => document.querySelector("#autoImageStatus")?.textContent?.includes("画像 5/9枚"), null, { timeout: 10000 });
+  const stored = await page.evaluate(() => JSON.parse(localStorage.getItem("hs-studio-current-v1"))?.deck?.slides?.filter((slide) => slide.media?.kind === "image").length);
+  if (stored !== 5) throw new Error(`images not saved: ${stored}`);
 });
 
 await step("chat proposal: text and theme", async () => {

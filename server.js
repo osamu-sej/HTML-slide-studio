@@ -116,6 +116,7 @@ function loadStatic() {
   add("/", inject(readFileSync(join(PUBLIC, "index.html"), "utf8")), TYPES[".html"]);
   add("/app.js", inject(readFileSync(join(PUBLIC, "app.js"), "utf8")), TYPES[".js"]);
   add("/saved-library.js", readFileSync(join(PUBLIC, "saved-library.js"), "utf8"), TYPES[".js"]);
+  add("/auto-images.mjs", readFileSync(join(PUBLIC, "auto-images.mjs"), "utf8"), TYPES[".js"]);
   add("/app.css", readFileSync(join(PUBLIC, "app.css"), "utf8"), TYPES[".css"]);
   add("/layout-looks.mjs", readFileSync(join(PUBLIC, "layout-looks.mjs"), "utf8"), TYPES[".js"]);
   add("/engine/engine.js", readFileSync(join(PUBLIC, "engine", "engine.js"), "utf8").replace("/*__ICONS__*/{}", () => icons), TYPES[".js"]);
