@@ -467,6 +467,34 @@ test("chat can change the deck's motion graphics and keeps a slide's own motion 
   });
 });
 
+test("chat can turn a slide into one the audience works with, and the prompt says how to choose", async () => {
+  await withFakeCodex([
+    {
+      reply: "2枚目を、人数と利用率を動かせる試算にしました。",
+      operations: [{ op: "replace", slide: 2, content: {
+        type: "simulator", title: "本文1", takeaway: "利用率を**8割**にすれば届く", source: "試行の実績",
+        inputs: [{ label: "人数", value: 120, min: 50, max: 600, step: 10, unit: "人" }, { label: "利用率", value: 60, min: 10, max: 100, unit: "%" }],
+        formula: "a × 12 × b ÷ 100", resultLabel: "月の削減時間", resultUnit: "時間", compareLabel: "目標", compareValue: 1440,
+        details: [{ target: "takeaway", text: "1人あたり12時間は試行の平均", rows: [{ label: "資料作成", value: "5時間" }], source: "試行の実績" }],
+      } }],
+      suggestions: [],
+    },
+  ], async (server, prompts) => {
+    const slides = shortDeck(4).slideData;
+    const deck = { title: "テスト", theme: "clarity", transition: "fade", slides };
+    const job = await waitForJob(server, (await (await server.postJson("/api/decks/chat", { deck, message: "2枚目を条件を変えて試算できるようにして。1人あたり12時間、120人、目標1,440時間、利用率60%、資料作成5時間" })).json()).jobId);
+    assert.equal(job.status, "completed", job.error);
+    const slide = job.chat.slides[1];
+    assert.equal(slide.type, "simulator");
+    assert.equal(slide.formula, "a × 12 × b ÷ 100");
+    assert.deepEqual(slide.details[0].rows, [{ label: "資料作成", value: "5時間" }]);
+    const [prompt] = await prompts();
+    assert.match(prompt, /動く資料（1枚1操作）/);
+    assert.match(prompt, /原因と結果（試算・感度） → 条件を動かすと計算し直す（simulator）/);
+    assert.match(prompt, /chartType=rank/);
+  });
+});
+
 test("chat answers questions without changing the deck and rejects unusable operations", async () => {
   await withFakeCodex([
     { reply: "表紙は削除できないため、代わりに…", operations: [{ op: "delete", slide: 1 }], suggestions: [] },

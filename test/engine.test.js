@@ -28,9 +28,9 @@ const deckOf = (slides, extra = {}) => ({ title: "検証デッキ", audience: "�
 test("the engine renders every layout in every theme with editable, animatable parts", async () => {
   const { E } = await loadEngine();
   assert.equal(E.THEMES.length, 8);
-  assert.equal(Object.keys(E.TYPE_LABELS).length, 42);
+  assert.equal(Object.keys(E.TYPE_LABELS).length, 44);
   const types = new Set(allLayoutSlides.map((slide) => slide.type));
-  assert.equal(types.size, 42, "the fixture covers every layout");
+  assert.equal(types.size, 44, "the fixture covers every layout");
   for (const theme of E.THEMES) {
     const deck = deckOf(allLayoutSlides, { theme: theme.id });
     deck.slides.forEach((slide, index) => {
@@ -235,6 +235,85 @@ test("more motion types: entrances, hovers, emphasis, spotlight and photo motion
     assert.equal(hero.querySelector(".hs-media").dataset.motion, motion);
   }
   assert.equal(E.render({ ...slides[2], photoMotion: "shake" }, { deck, index: 2, mode: "present" }).querySelector(".hs-media").dataset.motion, undefined, "an unknown photo motion stays still");
+});
+
+test("formulas: arithmetic on the conditions a, b, c, never code", async () => {
+  const { E } = await loadEngine();
+  assert.equal(E.evalFormula("a × b × c ÷ 100", { a: 120, b: 12, c: 60 }), 864);
+  assert.equal(E.evalFormula("(a + b) * 2 - c / 4", { a: 1, b: 2, c: 8 }), 4);
+  assert.equal(E.evalFormula("－a＋１０", { a: 3 }), 7, "full-width signs and digits work");
+  assert.equal(E.evalFormula("-(a - b)", { a: 1, b: 3 }), 2);
+  for (const bad of ["a +", "a b", "(a", "alert(1)", "a ** 2", "d + 1", "", "1/0"]) assert.ok(Number.isNaN(E.evalFormula(bad, { a: 1, b: 2, c: 3 })), bad);
+  assert.equal(E.formulaTokens("a × 2").length, 3);
+  assert.equal(E.formulaTokens("window"), null);
+});
+
+test("pages the audience works with: evidence, rankings, before/after, simulators, gaps and 'now'", async () => {
+  const { E } = await loadEngine();
+  const byTitle = (title) => allLayoutSlides.find((slide) => slide.title === title);
+  const deck = deckOf(allLayoutSlides);
+  const at = (slide) => allLayoutSlides.indexOf(slide);
+
+  // The source of the figures sits at the foot of the page and goes with the chart tooltips.
+  const rankSlide = byTitle("切り口で並び替え");
+  const rank = E.render({ ...rankSlide, details: [{ target: "takeaway", text: "1人あたりでは営業", rows: [{ label: "営業", value: "8時間" }], source: "社内集計" }] }, { deck, index: at(rankSlide), mode: "present" });
+  assert.equal(rank.dataset.source, "社内集計 2026年");
+  assert.match(rank.querySelector(".hs-foot .hs-source").textContent, /^出所：社内集計 2026年$/);
+  const row = (label) => rank.querySelector(`.hs-rank-row[data-label="${label}"]`);
+  assert.equal(row("企画").style.getPropertyValue("--r"), "0", "the first view ranks by its own values");
+  assert.equal(row("営業").style.getPropertyValue("--r"), "1");
+  assert.ok(row("営業").classList.contains("is-hot"), "the highlighted item stays marked in every view");
+  E.rankShow(rank.querySelector(".hs-rank"), 1);
+  assert.equal(row("営業").style.getPropertyValue("--r"), "0", "switching the view re-sorts");
+  assert.match(row("営業").dataset.tip, /営業：8時間（1位）/);
+  assert.equal(rank.querySelectorAll(".hs-rank-views [data-view]").length, 2);
+  assert.ok(rank.querySelector(".hs-rank-views").classList.contains("hs-control"));
+  // Evidence for the key message: a badge beside the sentence, which stays editable on its own.
+  const takeaway = rank.querySelector('.hs-takeaway-row[data-detail="takeaway"]');
+  assert.ok(takeaway.querySelector(".hs-takeaway[data-field=takeaway]"));
+  assert.equal(takeaway.querySelector(".hs-takeaway").textContent, rankSlide.takeaway);
+  assert.match(takeaway.querySelector(".hs-detail-badge").textContent, /根拠/);
+
+  const shiftSlide = byTitle("前後の差");
+  const shift = E.render(shiftSlide, { deck, index: at(shiftSlide), mode: "present" });
+  const rows = [...shift.querySelectorAll(".hs-shift-row")];
+  assert.equal(rows.length, 2);
+  assert.ok(rows[0].classList.contains("is-hot"), "the biggest change is the one in colour");
+  assert.equal(rows[0].querySelector(".hs-shift-delta").textContent, "−55");
+  assert.match(rows[0].querySelector(".hs-shift-bar").style.getPropertyValue("--from"), /%$/);
+
+  const simSlide = byTitle("試算");
+  const sim = E.render(simSlide, { deck, index: at(simSlide), mode: "present" });
+  assert.equal(sim.querySelector(".hs-sim-out").textContent, "1,440");
+  assert.match(sim.querySelector(".hs-sim-diff").textContent, /目標まで あと 1,560時間/);
+  assert.equal(sim.querySelectorAll("input[type=range][data-sim]").length, 2);
+  assert.match(sim.querySelector(".hs-sim-formula").textContent, /月の削減時間 ＝ 人数 × 1人あたり/);
+  const range = sim.querySelector('input[data-sim="0"]');
+  range.setAttribute("value", "300");
+  range.value = "300";
+  assert.equal(E.simUpdate(sim), 3600, "moving a condition recalculates the result");
+  assert.match(sim.querySelector(".hs-sim-diff").textContent, /目標を 600時間 上回る/);
+  assert.ok(sim.querySelector(".hs-sim").classList.contains("is-met"));
+
+  const gapSlide = byTitle("不足と打ち手");
+  const gap = E.render(gapSlide, { deck, index: at(gapSlide), mode: "present" });
+  assert.equal(gap.dataset.build, "click", "measures come on one per click");
+  assert.equal(gap.dataset.steps, "3");
+  assert.equal(gap.querySelector(".hs-gap-num").textContent, "+80", "a finished slide shows every measure on");
+  E.play(gap, { step: 0, animate: false });
+  assert.equal(gap.querySelectorAll("[data-measure].is-on").length, 0);
+  assert.equal(gap.querySelectorAll(".hs-hidden").length, 0, "nothing is hidden: the measures are switched, not revealed");
+  assert.equal(gap.querySelector(".hs-gap-num").textContent, "1,560");
+  E.reveal(gap, 1);
+  assert.deepEqual([...gap.querySelectorAll("[data-measure].is-on")].map((el) => el.dataset.measure), ["0"]);
+  assert.equal(gap.querySelector(".hs-gap-num").textContent, "940");
+  E.play(gap, { step: Infinity, animate: false });
+  assert.equal(gap.querySelector(".hs-gap-state").textContent, "目標を上回る");
+
+  const gantt = allLayoutSlides.find((slide) => slide.type === "gantt");
+  assert.equal(E.render(gantt, { deck, index: at(gantt), mode: "present" }).querySelector(".hs-gnow"), null, "no 'now' unless given");
+  const now = E.render({ ...gantt, now: 1.5 }, { deck, index: at(gantt), mode: "present" }).querySelector(".hs-gnow");
+  assert.equal(now.style.getPropertyValue("--at"), "1.5");
 });
 
 test("Lottie animations: a player box when shown, a badge in thumbnails", async () => {

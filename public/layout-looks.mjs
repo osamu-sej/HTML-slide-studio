@@ -11,6 +11,7 @@ export const LOOKS = {
   cards: { label: "カードの並び", examples: "カード・2×2・3列まとめ・SWOT", types: ["cards", "headerCards", "grid2x2", "headerTwoColumn", "headerThreeSummary", "swot"], alike: true },
   compare: { label: "左右の対比", examples: "比較・前後・数値比較", types: ["compare", "beforeAfter", "statsCompare"], alike: true },
   numbers: { label: "数字・グラフ", examples: "KPI・グラフ・ダッシュボード・ウォーターフォール", types: ["kpi", "dashboard", "waterfall", "imageText"] },
+  interactive: { label: "動かして確かめる", examples: "試算（スライダー）・不足と打ち手", types: ["simulator", "gap"] },
   shape: { label: "図形", examples: "サイクル・ピラミッド・ベン図・ロジックツリー・マトリクス", types: ["cycle", "pyramid", "funnel", "triangle", "venn", "stepUp", "logicTree", "orgChart", "matrix"] },
   table: { label: "表", examples: "表", types: ["table"] },
   impact: { label: "大きな一文・写真", examples: "ステートメント・全面写真・引用", types: ["statement", "hero", "quote"] },
@@ -85,4 +86,5 @@ export const LOOK_ADVICE = [
   "層・段階・レベル → pyramid・stepUp ／ 重なり・3要素の関係 → venn・triangle ／ 繰り返す取り組み → cycle",
   "原因・論点の分解 → logicTree ／ 2軸での位置づけ → matrix ／ 体制・役割 → orgChart",
   "数字が主役 → kpi・imageText（グラフ） ／ 決意・問い・転換点 → statement ／ 声 → quote",
+  "条件しだいで結果が変わる試算 → simulator ／ 目標との差を打ち手で埋める → gap",
 ];

@@ -43,6 +43,9 @@ export function capacityIssues(slides, { only = null } = {}) {
     (slide.rows ?? []).forEach((row, r) => row.forEach((cell, c) => over(i, `rows[${r}][${c}]`, cell, LIMITS.cell)));
     (slide.branches ?? []).forEach((branch, b) => (branch.items ?? []).forEach((leaf, k) => over(i, `branches[${b}].items[${k}]`, leaf, LIMITS.leaf)));
     (slide.milestones ?? []).forEach((mile, k) => over(i, `milestones[${k}].label`, mile.label, LIMITS.milestone));
+    (slide.measures ?? []).forEach((m, k) => { if (m.title) over(i, `measures[${k}].title`, m.title, 16); if (m.desc) over(i, `measures[${k}].desc`, m.desc, 30); });
+    (slide.inputs ?? []).forEach((input, k) => { if (input.label) over(i, `inputs[${k}].label`, input.label, 14); });
+    if (slide.source) over(i, "source", slide.source, 60);
     // Pictures, speaker notes and click-to-open details are not text on the slide.
     const bodyChars = JSON.stringify(slide, (key, value) => (NOT_ON_SLIDE.has(key) ? undefined : value)).length;
     if (bodyChars > 2600 && !["table"].includes(slide.type)) issues.push({ kind: "overflow", severity: "warning", slide: i, field: "body", message: "1枚の文字が多すぎます。要素を絞るか2枚に分けてください" });

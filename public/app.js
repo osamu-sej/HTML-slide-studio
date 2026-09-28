@@ -29,6 +29,7 @@ const TYPE_DESC = {
   bulletCards: "説明付きの要点", headerTwoColumn: "見出し付き2列", headerThreeSummary: "3論点から結論へ", grid2x2: "4つの論点", matrix: "2軸で整理",
   swot: "強み・弱み・機会・脅威", diagram: "役割ごとの流れ", cycle: "循環する取り組み", pyramid: "階層構造", funnel: "段階的な絞り込み",
   stepUp: "段階的な成長", triangle: "3要素の関係", venn: "重なり", orgChart: "体制・役割分担", checklist: "確認項目", faq: "想定問答", quote: "声・メッセージ",
+  simulator: "条件を動かすと結果を計算し直す", gap: "打ち手で目標との差を埋める",
 };
 const TYPE_INFO = Object.fromEntries(Object.keys(TYPE_DESC).map((type) => [type, [E.TYPE_LABELS[type] ?? type, TYPE_DESC[type]]]));
 const SLIDE_TYPES = Object.keys(TYPE_INFO);
@@ -126,7 +127,21 @@ const SPEC = {
   checklist: [G("items", "項目", [T("title", "項目", { req: true, max: 18 }), A("desc", "説明", { max: 45, rows: 2 }), C("done", "完了済み")], { min: 1, max: 7, newItem: () => ({ title: "確認項目", desc: "" }) })],
   matrix: [T("yLabel", "縦軸の名前", { max: 12 }), T("xLabel", "横軸の名前", { max: 12 }), CARDS("象限（左上→右上→左下→右下）", 4, 4, { icon: false })],
   swot: [CARDS("象限（強み→弱み→機会→脅威）", 4, 4, { icon: false })],
-  gantt: [L("periods", "期間（1行に1つ）", { max: 8 }), G("items", "タスク", [T("title", "タスク", { req: true, max: 14 }), T("desc", "バーの文言", { max: 14 }), N("start", "開始（0始まり）", { min: 0, max: 7 }), N("span", "期間数", { min: 1, max: 8 })], { min: 2, max: 7, newItem: () => ({ title: "タスク", desc: "", start: 0, span: 1 }) })],
+  gantt: [L("periods", "期間（1行に1つ）", { max: 8 }), G("items", "タスク", [T("title", "タスク", { req: true, max: 14 }), T("desc", "バーの文言", { max: 14 }), N("start", "開始（0始まり）", { min: 0, max: 7 }), N("span", "期間数", { min: 1, max: 8 })], { min: 2, max: 7, newItem: () => ({ title: "タスク", desc: "", start: 0, span: 1 }) }),
+    N("now", "「いま」の線（期間の位置。例：1.5＝2つ目の期間の真ん中。空欄なら出さない）", { free: true, optional: true })],
+  simulator: [
+    G("inputs", "条件（発表中はスライダーで動かせます。式では上から a・b・c）", [T("label", "条件の名前", { req: true, max: 14 }), N("value", "いまの値", { free: true }), N("min", "最小", { free: true }), N("max", "最大", { free: true }), N("step", "刻み（空欄なら自動）", { free: true, optional: true }), T("unit", "単位", { max: 8 })], { min: 1, max: 3, newItem: () => ({ label: "条件", value: 10, min: 0, max: 20, unit: "" }) }),
+    T("formula", "計算式（a・b・c と ＋ − × ÷ ( ) と数字。例：a × b × c ÷ 100）", { req: true, max: 60 }),
+    T("resultLabel", "結果の名前", { max: 16, placeholder: "例：月の削減時間" }), T("resultUnit", "結果の単位", { max: 8 }),
+    S("digits", "小数点以下", [["", "自動"], ["0", "0桁"], ["1", "1桁"], ["2", "2桁"]], { number: true }),
+    T("compareLabel", "比べる値の名前（目標・現状など。任意）", { max: 12 }), N("compareValue", "比べる値（空欄なら出さない）", { free: true, optional: true }),
+  ],
+  gap: [
+    T("unit", "単位", { max: 8, placeholder: "例：時間・億円" }),
+    T("targetLabel", "目標の名前", { max: 12 }), N("target", "目標の値", { free: true }),
+    T("currentLabel", "現状の名前", { max: 12 }), N("current", "現状の値", { free: true }),
+    G("measures", "打ち手（発表中はクリックのたびに1つずつオン。クリックでオン・オフも）", [T("title", "打ち手", { req: true, max: 16 }), N("value", "上乗せする量", { free: true }), A("desc", "説明", { max: 30, rows: 2 })], { min: 1, max: 5, newItem: () => ({ title: "打ち手", value: 10, desc: "" }) }),
+  ],
   waterfall: [T("unit", "単位", { max: 6, placeholder: "例：時間・億円" }), G("items", "棒（左から）", [T("label", "名前", { req: true, max: 8 }), N("value", "値（減少はマイナス）", { free: true }), C("total", "合計の棒（0から立てる）")], { min: 2, max: 8, newItem: () => ({ label: "要因", value: 10 }) })],
   logicTree: [T("root", "分解する課題・論点", { req: true, max: 20 }), G("branches", "枝", [T("title", "枝（要因・論点）", { req: true, max: 14 }), L("items", "葉（1行に1つ）", { max: 3, maxChars: 18 }), C("highlight", "強調する（手を打つ枝）")], { min: 2, max: 4, newItem: () => ({ title: "要因", items: ["具体的な事象"] }) })],
   table: [{ kind: "table", key: "table", label: "表" }],
@@ -144,6 +159,7 @@ const COMMON_TOP = [
   T("title", "タイトル（論点）", { req: true, max: 30 }),
   A("takeaway", "キーメッセージ（結論を一文で。**語句** で囲むとその語句だけ強調）", { max: 60, rows: 2 }),
   T("subhead", "小見出し（任意。空欄なら章の名前を表示）", { max: 24 }),
+  T("source", "出所（任意。ページ下とグラフの吹き出しに出ます）", { max: 60, placeholder: "例：総務省「労働力調査」2025年" }),
 ];
 
 function specFor(type) {
@@ -429,7 +445,7 @@ function normalizeSlide(raw, index, total) {
   type = aliases[type] ?? type;
   if (!SLIDE_TYPES.includes(type)) throw new Error(`${index + 1}枚目: 未対応のレイアウト「${type}」です。`);
   const slide = { ...source, type };
-  for (const key of ["title", "subtitle", "subhead", "takeaway", "message", "notes", "text", "author", "summary", "conclusion", "action", "root", "centerText"]) {
+  for (const key of ["title", "subtitle", "subhead", "takeaway", "message", "notes", "text", "author", "summary", "conclusion", "action", "root", "centerText", "source"]) {
     if (typeof slide[key] === "string") slide[key] = EMPHASIS_KEYS.has(key) ? keepEmphasis(slide[key]) : strip(slide[key]);
   }
   if (!slide.takeaway && TITLED(type) && source.keyMessage) slide.takeaway = keepEmphasis(source.keyMessage);
@@ -454,7 +470,12 @@ function normalizeSlide(raw, index, total) {
     if (slide[key] != null && (!Object.hasOwn(info, slide[key]) || slide[key] === "auto")) delete slide[key];
   }
   if (Array.isArray(slide.details)) {
-    slide.details = slide.details.filter((d) => d && typeof d.target === "string" && strip(d.text)).map((d) => ({ target: d.target.slice(0, 30), ...(strip(d.title) ? { title: strip(d.title).slice(0, 60) } : {}), text: String(d.text).slice(0, 400) })).slice(0, 12);
+    // Evidence: the judgement (text), and optionally a breakdown, where the figures come from, and assumptions.
+    const rowsOf = (rows) => (Array.isArray(rows) ? rows : []).filter((row) => row && strip(row.label)).map((row) => ({ label: strip(row.label).slice(0, 40), value: strip(row.value ?? "").slice(0, 30) })).slice(0, 8);
+    slide.details = slide.details.filter((d) => d && typeof d.target === "string" && strip(d.text)).map((d) => ({
+      target: d.target.slice(0, 30), ...(strip(d.title) ? { title: strip(d.title).slice(0, 60) } : {}), text: String(d.text).slice(0, 400),
+      ...(rowsOf(d.rows).length ? { rows: rowsOf(d.rows) } : {}), ...(strip(d.source) ? { source: strip(d.source).slice(0, 120) } : {}), ...(strip(d.note) ? { note: String(d.note).trim().slice(0, 200) } : {}),
+    })).slice(0, 12);
     if (!slide.details.length) delete slide.details;
   } else delete slide.details;
   if (typeof slide.drillOf === "string" && slide.drillOf.trim() && index > 0 && TITLED(type)) slide.drillOf = slide.drillOf.trim().slice(0, 30);
@@ -527,7 +548,9 @@ function sanitizeSlide(slide) {
         items.forEach((item) => fixFields(item, field.fields));
         target[field.key] = items;
       } else if (field.kind === "number" && field.free) {
-        target[field.key] = value === "" || value == null || Number.isNaN(Number(value)) ? 0 : Number(value);
+        const empty = value === "" || value == null || Number.isNaN(Number(value));
+        if (empty && field.optional) delete target[field.key];
+        else target[field.key] = empty ? 0 : Number(value);
       } else if (field.kind === "number") {
         if (value === "" || value == null || Number.isNaN(Number(value))) delete target[field.key];
         else target[field.key] = Math.max(field.min ?? 0, Math.min(field.max ?? 99, Math.round(Number(value))));
@@ -606,6 +629,8 @@ function defaultSlide(type) {
     case "waterfall": return { ...base, unit: "", items: [{ label: "前期", value: 100, total: true }, { label: "増加要因", value: 30 }, { label: "減少要因", value: -10 }, { label: "今期", value: 120, total: true }] };
     case "logicTree": return { ...base, root: "分解する課題", branches: [{ title: "要因A", items: ["具体的な事象"] }, { title: "要因B", items: ["具体的な事象"] }, { title: "要因C", items: ["具体的な事象"] }] };
     case "checklist": return { ...base, items: card(3).map((item) => ({ ...item, done: false })) };
+    case "simulator": return { ...base, title: "条件を変えたときの試算", takeaway: "条件によって結果がどう変わるか", inputs: [{ label: "対象人数", value: 100, min: 10, max: 500, step: 10, unit: "人" }, { label: "1人あたりの効果", value: 5, min: 1, max: 20, unit: "時間" }], formula: "a × b", resultLabel: "合計の効果", resultUnit: "時間", compareLabel: "目標", compareValue: 1000 };
+    case "gap": return { ...base, title: "目標までの不足と打ち手", takeaway: "打ち手を重ねると目標に届く", unit: "", targetLabel: "目標", target: 100, currentLabel: "現状", current: 60, measures: [{ title: "打ち手A", value: 20, desc: "" }, { title: "打ち手B", value: 15, desc: "" }, { title: "打ち手C", value: 10, desc: "" }] };
     default: return { ...base, items: card(3) };
   }
 }
@@ -624,13 +649,15 @@ function extractUnits(slide) {
   (slide.flows || []).forEach((flow) => (flow.steps || []).forEach((step) => push(...split(step))));
   (slide.rows || []).forEach((row) => push(row[0], row.slice(1).join(" / ")));
   (slide.branches || []).forEach((branch) => push(branch.title, (branch.items || []).join("、")));
+  (slide.measures || []).forEach((m) => push(m.title, m.desc));
+  (slide.inputs || []).forEach((input) => push(input.label, `${input.value ?? ""}${input.unit ?? ""}`));
   if (slide.type === "statement" && slide.text) push(slide.text);
   return units;
 }
 
 function convertSlide(slide, type) {
   const next = defaultSlide(type);
-  for (const key of ["title", "takeaway", "subhead", "notes", "visualAsset", "customImage", "imagePlacement", "media", "photoMotion", "kinetic", "backdrop", "entrance", "emphasis", "transition", "drillOf"]) {
+  for (const key of ["title", "takeaway", "subhead", "source", "notes", "visualAsset", "customImage", "imagePlacement", "media", "photoMotion", "kinetic", "backdrop", "entrance", "emphasis", "transition", "drillOf"]) {
     if (slide[key] && (key !== "takeaway" || TITLED(type))) next[key] = clone(slide[key]);
   }
   if (type === "closing" && !next.message) next.message = slide.takeaway || slide.message || "";
@@ -670,6 +697,7 @@ function convertSlide(slide, type) {
     case "logicTree": next.branches = units.slice(0, 4).map((u) => ({ title: u.title.slice(0, 14), items: u.desc ? u.desc.split(/[、,]/).map((x) => x.trim()).filter(Boolean).slice(0, 3) : [] })); while (next.branches.length < 2) next.branches.push({ title: "要因", items: [] }); break;
     case "waterfall": { const found = units.map((u) => ({ label: u.title.slice(0, 8), value: Number(String(u.desc).replace(/[,，]/g, "").match(/[-−]?\d+(?:\.\d+)?/)?.[0]?.replace("−", "-")) })).filter((item) => Number.isFinite(item.value)).slice(0, 8); if (found.length >= 2) next.items = found; break; }
     case "cards": case "headerCards": case "grid2x2": next.items = cards(1, type === "grid2x2" ? 4 : 6); break;
+    case "gap": next.measures = cards(1, 5).map((c) => ({ title: c.title.slice(0, 16), value: Number(String(c.desc).replace(/[,，]/g, "").match(/\d+(?:\.\d+)?/)?.[0]) || 10, ...(c.desc ? { desc: c.desc.slice(0, 30) } : {}) })); break;
     default: break;
   }
   return next;
@@ -1350,7 +1378,7 @@ const PLACEHOLDERS = new Set([
   "工程", "項目", "補足", "説明", "伝えたいひと言", "写真に重ねて見せる補足の一文", "ポイント", "いちばん伝えたい**ひと言**を大きく",
 ]);
 const FULLWIDTH_NUMBER = /[０-９％．，]/;
-const NON_TEXT_KEYS = new Set(["type", "visualAsset", "imagePosition", "state", "trend", "status", "chartType", "customImage", "icon", "animation", "photoMotion", "kinetic", "backdrop", "entrance", "emphasis", "transition", "media", "imagePlacement", "target", "notes"]);
+const NON_TEXT_KEYS = new Set(["type", "visualAsset", "imagePosition", "state", "trend", "status", "chartType", "customImage", "icon", "animation", "photoMotion", "kinetic", "backdrop", "entrance", "emphasis", "transition", "media", "imagePlacement", "target", "notes", "formula"]);
 
 function textEntries(value, path = [], out = []) {
   if (typeof value === "string") out.push([path, value]);
@@ -2144,6 +2172,14 @@ function tableEditor(slide) {
 
 function chartToCsv(image) {
   const data = image?.data || {};
+  // A ranking by view: one column per view. Before → after: two columns.
+  if (Array.isArray(data.views) && data.views.length) {
+    const labels = [...new Set(data.views.flatMap((view) => (view.items || []).map((item) => item.label)))];
+    return [["ラベル", ...data.views.map((view) => view.label || "切り口")].join(","), ...labels.map((label) => [label, ...data.views.map((view) => view.items?.find((item) => item.label === label)?.value ?? "")].join(","))].join("\n");
+  }
+  if (image?.chartType === "shift") {
+    return [["ラベル", data.beforeLabel || "前", data.afterLabel || "後"].join(","), ...(data.items || []).map((item) => [item.label, item.before ?? "", item.value ?? ""].join(","))].join("\n");
+  }
   if (Array.isArray(data.series) && data.series.length) {
     const labels = data.xAxisLabels || [];
     return [["ラベル", ...data.series.map((item) => item.label || "系列")].join(","), ...labels.map((label, i) => [label, ...data.series.map((item) => item.values?.[i] ?? "")].join(","))].join("\n");
@@ -2154,11 +2190,26 @@ function chartToCsv(image) {
   return (data.items || []).map((item) => `${item.label},${item.value ?? item.barValue ?? ""}`).join("\n");
 }
 
-function csvToChartData(csv, chartType, title) {
+function csvToChartData(csv, chartType, title, keep = {}) {
   const rows = csv.split("\n").map((line) => line.split(/[,\t，]/).map((cell) => cell.trim())).filter((row) => row.length && row[0] !== "");
   const numeric = (value) => Number(String(value).replace(/[^\d.\-]/g, ""));
   const multi = rows.length && rows[0].length > 2 && rows[0].slice(1).some((cell) => Number.isNaN(numeric(cell)) || cell === "");
-  const data = { ...(title ? { title } : {}) };
+  const data = { ...(title ? { title } : {}), ...(keep.unit ? { unit: keep.unit } : {}), ...(keep.highlight && chartType === "rank" ? { highlight: keep.highlight } : {}) };
+  const hasHead = rows.length > 1 && rows[0].slice(1).some((cell) => cell !== "" && Number.isNaN(Number(cell.replace(/[,，]/g, ""))));
+  const value = (cell) => (cell === "" || cell == null || Number.isNaN(numeric(cell)) ? undefined : numeric(cell));
+  if (chartType === "rank") {
+    const [head, ...body] = hasHead ? rows : [["ラベル", ...rows[0].slice(1).map((_, i) => `切り口${i + 1}`)], ...rows];
+    data.views = head.slice(1, 5).map((label, i) => ({ label: label || `切り口${i + 1}`, items: body.slice(0, 12).map((row) => ({ label: row[0], value: value(row[i + 1]) })).filter((item) => item.value !== undefined) }));
+    if (!data.views.length) data.views = [{ label: "全体", items: [] }];
+    return data;
+  }
+  if (chartType === "shift") {
+    const [head, ...body] = hasHead ? rows : [["ラベル", "前", "後"], ...rows];
+    data.beforeLabel = head[1] || "前";
+    data.afterLabel = head[2] || "後";
+    data.items = body.slice(0, 8).map((row) => ({ label: row[0], before: value(row[1]) ?? 0, value: value(row[2]) ?? 0 }));
+    return data;
+  }
   if (multi) {
     const [head, ...body] = rows;
     const names = head.slice(1);
@@ -2189,15 +2240,24 @@ function chartEditor(field, slide) {
   };
   const body = [];
   if (mode === "chart") {
-    const chartTypes = [["bar", "棒"], ["line", "折れ線"], ["donut", "ドーナツ"], ["multi-line", "複数の折れ線"], ["stacked-bar", "積み上げ棒"], ["100-stacked-bar", "100%積み上げ"], ["combo", "棒＋折れ線"]];
+    const chartTypes = [["bar", "棒"], ["line", "折れ線"], ["donut", "ドーナツ"], ["multi-line", "複数の折れ線"], ["stacked-bar", "積み上げ棒"], ["100-stacked-bar", "100%積み上げ"], ["combo", "棒＋折れ線"], ["rank", "順位（切り口で並び替わる）"], ["shift", "前後の差（Before→After）"]];
     const update = (patch) => { beginEdit(); const current = slide[field.key]; slide[field.key] = { ...current, ...patch }; markChanged(); };
+    const keep = () => ({ unit: slide[field.key].data?.unit, highlight: slide[field.key].data?.highlight });
+    const setData = (key, value) => update({ data: { ...slide[field.key].data, [key]: value || undefined } });
+    const hints = {
+      rank: "1行目に「ラベル,切り口A,切り口B」（例：業種,全体,一次請け,二次請け）。発表中は切り口のボタンで全部の棒が並び替わります。値のない項目は最後に並びます。",
+      shift: "1行目に「ラベル,前の名前,後の名前」（例：内訳,2024年度,2025年度）、2行目から「ラベル,前の値,後の値」。発表中は棒が前から後へ縮み（伸び）、減った分が点線で残ります。",
+    };
     body.push(
       h("div", { class: "grid-2" },
-        h("div", { class: "field" }, h("label", {}, "種類"), h("select", { onchange: (event) => { pushUndo(); const current = slide[field.key]; slide[field.key] = { chartType: event.target.value, data: csvToChartData(chartToCsv(current), event.target.value, current.data?.title) }; markChanged({ structural: true }); } }, chartTypes.map(([value, text]) => h("option", { value, selected: image.chartType === value }, text)))),
+        h("div", { class: "field" }, h("label", {}, "種類"), h("select", { onchange: (event) => { pushUndo(); const current = slide[field.key]; slide[field.key] = { chartType: event.target.value, data: csvToChartData(chartToCsv(current), event.target.value, current.data?.title, { unit: current.data?.unit, highlight: current.data?.highlight }) }; markChanged({ structural: true }); } }, chartTypes.map(([value, text]) => h("option", { value, selected: image.chartType === value }, text)))),
         h("div", { class: "field" }, h("label", {}, "グラフタイトル"), h("input", { type: "text", value: image.data?.title ?? "", oninput: (event) => update({ data: { ...slide[field.key].data, title: event.target.value || undefined } }) }))),
+      ["rank", "shift"].includes(image.chartType) ? h("div", { class: "grid-2" },
+        h("div", { class: "field" }, h("label", {}, "単位"), h("input", { type: "text", maxlength: 10, placeholder: "例：%・時間", value: image.data?.unit ?? "", oninput: (event) => setData("unit", event.target.value) })),
+        image.chartType === "rank" ? h("div", { class: "field" }, h("label", {}, "主役（強調する項目名）"), h("input", { type: "text", maxlength: 80, placeholder: "空欄なら1位を強調", value: image.data?.highlight ?? "", oninput: (event) => setData("highlight", event.target.value) })) : null) : null,
       h("div", { class: "field" }, h("label", {}, "データ（CSV）"),
-        h("textarea", { rows: 5, "data-path": field.key, style: { "font-family": "ui-monospace, Menlo, monospace", "font-size": "12px" }, oninput: (event) => update({ data: csvToChartData(event.target.value, slide[field.key].chartType, slide[field.key].data?.title) }) }, chartToCsv(image)),
-        h("div", { class: "hint" }, "1行に「ラベル,値」。複数系列は1行目を「ラベル,系列A,系列B」にします。発表中はグラフが伸び、マウスを乗せると値が出ます。")));
+        h("textarea", { rows: 5, "data-path": field.key, style: { "font-family": "ui-monospace, Menlo, monospace", "font-size": "12px" }, oninput: (event) => update({ data: csvToChartData(event.target.value, slide[field.key].chartType, slide[field.key].data?.title, keep()) }) }, chartToCsv(image)),
+        h("div", { class: "hint" }, hints[image.chartType] ?? "1行に「ラベル,値」。複数系列は1行目を「ラベル,系列A,系列B」にします。発表中はグラフが伸び、マウスを乗せると値が出ます。")));
   } else if (mode === "picture") {
     body.push(h("img", { src: image, alt: "", style: { width: "100%", "border-radius": "8px", border: "1px solid var(--line)" } }),
       h("button", { class: "btn", type: "button", onclick: () => { pushUndo(); delete slide[field.key]; markChanged({ structural: true }); } }, "この画像を外す"));
@@ -2447,7 +2507,7 @@ function motionGraphicsSection(slide) {
     h("div", { class: "hint", style: { "margin-top": "6px" } }, `${now}。おまかせは「デザインと動き」の設定に従います（文字・背景は表紙・章扉・ひと言・最後のスライドに効きます）。`));
 }
 
-const ITEM_NAMES = { items: "項目", steps: "工程", points: "要点", rows: "行", milestones: "時期", lanes: "レーン", levels: "段", branches: "枝", stats: "指標", flows: "流れ", message: "アクション", leftItems: "左", rightItems: "右" };
+const ITEM_NAMES = { items: "項目", steps: "工程", points: "要点", rows: "行", milestones: "時期", lanes: "レーン", levels: "段", branches: "枝", stats: "指標", flows: "流れ", message: "アクション", leftItems: "左", rightItems: "右", measures: "打ち手", inputs: "条件" };
 
 /** The words of one item ("items[1]") of a slide. */
 function itemText(slide, key) {
@@ -2471,10 +2531,16 @@ function itemKeys(slide, index) {
   return [...new Set([...el.querySelectorAll("[data-item]")].map((node) => node.dataset.item))].map((key) => ({ key, label: itemLabel(slide, key) }));
 }
 
+/** "ラベル,値" lines ⇄ a detail's breakdown rows. */
+const rowsToText = (rows) => (rows || []).map((row) => `${row.label},${row.value ?? ""}`).join("\n");
+const textToRows = (text) => String(text).split("\n").map((line) => line.split(/[,\t，]/)).filter((cells) => strip(cells[0])).map(([label, ...rest]) => ({ label: label.trim().slice(0, 40), value: rest.join(",").trim().slice(0, 30) })).slice(0, 8);
+
 function detailsSection(slide, index) {
-  const keys = itemKeys(slide, index);
+  // The key message can carry the evidence for the slide's conclusion ("根拠"), besides any item.
+  const keys = [...(TITLED(slide.type) && strip(slide.takeaway) ? [{ key: "takeaway", label: "キーメッセージの根拠" }] : []), ...itemKeys(slide, index)];
   const details = Array.isArray(slide.details) ? slide.details : [];
   const commit = (fn, structural = false) => { if (structural) pushUndo(); else beginEdit(); fn(); if (!slide.details?.length) delete slide.details; markChanged({ structural }); };
+  const setOptional = (detail, key, value) => { if (strip(value)) detail[key] = value; else delete detail[key]; };
   const cards = details.map((detail, i) => h("div", { class: "detail-card" },
     h("div", { class: "detail-head" },
       h("select", { "aria-label": "詳細を開く項目", onchange: (event) => commit(() => { detail.target = event.target.value; }, true) },
@@ -2482,13 +2548,19 @@ function detailsSection(slide, index) {
         keys.map((entry) => h("option", { value: entry.key, selected: entry.key === detail.target }, entry.label))),
       h("button", { class: "btn btn-ghost btn-sm btn-danger", type: "button", title: "この詳細を削除", onclick: () => commit(() => { details.splice(i, 1); }, true) }, "✕")),
     h("input", { type: "text", maxlength: 60, placeholder: "詳細の見出し（任意）", value: detail.title ?? "", oninput: (event) => commit(() => { if (event.target.value) detail.title = event.target.value; else delete detail.title; }) }),
-    h("textarea", { rows: 3, maxlength: 400, placeholder: "クリックしたときに開く説明（根拠・具体例・数字の出典など）", oninput: (event) => commit(() => { detail.text = event.target.value; }) }, detail.text ?? "")));
+    h("textarea", { rows: 3, maxlength: 400, placeholder: "クリックしたときに開く説明（根拠・具体例・数字の出典など）", oninput: (event) => commit(() => { detail.text = event.target.value; }) }, detail.text ?? ""),
+    h("details", { class: "detail-evidence", "data-key": `evidence-${i}`, open: Boolean(detail.rows?.length || detail.source || detail.note) },
+      h("summary", {}, "根拠パネルにする（内訳・出所・前提）"),
+      h("textarea", { rows: 3, placeholder: "内訳（1行に「ラベル,値」。例：資料作成,620時間）", "aria-label": "内訳", oninput: (event) => commit(() => { const rows = textToRows(event.target.value); if (rows.length) detail.rows = rows; else delete detail.rows; }) }, rowsToText(detail.rows)),
+      h("input", { type: "text", maxlength: 120, placeholder: "出所（例：社内アンケート 2025年9月、n=120）", "aria-label": "出所", value: detail.source ?? "", oninput: (event) => commit(() => setOptional(detail, "source", event.target.value)) }),
+      h("textarea", { rows: 2, maxlength: 200, placeholder: "前提・注記（任意）", "aria-label": "前提", oninput: (event) => commit(() => setOptional(detail, "note", event.target.value)) }, detail.note ?? ""),
+      h("div", { class: "hint" }, "どれかを入れると、発表中は右から根拠パネルが開きます（内訳は数字なら棒で表示）。"))));
   const free = keys.find((entry) => !details.some((detail) => detail.target === entry.key));
   return h("div", { class: "section" },
     h("div", { class: "section-title" }, h("span", {}, `クリックで開く詳細（${details.length}）`),
       h("span", { class: "btns" }, h("button", { class: "btn btn-sm", type: "button", disabled: !state.codexAuthorized || state.aiBusy || !keys.length, title: "各項目の補足をAIに書いてもらう", onclick: () => sendChat(`@${index + 1} の主な項目に、クリックで開く詳細（根拠・具体例・数字の内訳）を付けて`) }, "✦ AIで作る"))),
     keys.length
-      ? h("p", { class: "hint section-note" }, "発表中に項目をクリックすると、説明のカードが開きます。スライドに書ききれない根拠や具体例に。")
+      ? h("p", { class: "hint section-note" }, "発表中に項目をクリックすると、説明のカードが開きます。スライドに書ききれない根拠や具体例に。内訳・出所を入れると、右から開く根拠パネルになります。")
       : h("p", { class: "hint section-note" }, "このレイアウトには、詳細を付けられる項目がありません。"),
     cards,
     keys.length && details.length < 12 ? h("button", { class: "btn add-item", type: "button", onclick: () => commit(() => { slide.details = [...details, { target: (free ?? keys[0]).key, text: "" }]; }, true) }, "＋ 詳細を追加") : null);
@@ -4112,12 +4184,14 @@ const EXPORT_BOOT = `(async function () {
     if (media && /^data:/.test(media.src)) { try { media.src = URL.createObjectURL(await (await fetch(media.src)).blob()); } catch (e) {} }
   }
   var boot = document.querySelector(".hs-boot"); if (boot) boot.remove();
-  var start = Math.max(0, (parseInt(location.hash.slice(1), 10) || 1) - 1);
+  // "#5" opens slide 5; "#static" (or "#5-static") shows every slide finished, without motion.
+  var still = /static/.test(location.hash);
+  var start = Math.max(0, (parseInt((location.hash.match(/\\d+/) || ["1"])[0], 10) || 1) - 1);
   E.createPlayer(document.body, {
-    deck: data.deck, start: start, closable: false,
+    deck: data.deck, start: start, closable: false, static: still,
     fitFor: function (i) { return data.fits[i] || undefined; },
     renderOptions: { assetMap: data.assets, assetBase: "" },
-    onChange: function (s) { try { history.replaceState(null, "", "#" + (s.index + 1)); } catch (e) {} }
+    onChange: function (s) { try { history.replaceState(null, "", "#" + (s.index + 1) + (still ? "-static" : "")); } catch (e) {} }
   });
 })();`;
 
@@ -4337,7 +4411,42 @@ async function openSample() {
 // ---------------------------------------------------------------- templates
 
 const T_CARD = (title, desc) => ({ title, desc });
+// A worked example of a deck the audience can work with: each page carries one action chosen by what its
+// headline says (結論と根拠・切り口・差分・原因と結果・不足と打ち手・流れ), and evidence behind its figures.
+const INTERACTIVE_SOURCE = "社内試行（5部門・120人・3か月）";
+const INTERACTIVE_TEMPLATE = {
+  id: "interactive", name: "動く資料（クリックで確かめる）", desc: "6つの構造ごとに1つの操作。例：生成AIの全社展開", audience: "役員", purpose: "意思決定・報告",
+  slides: [
+    { type: "title", title: "生成AIの全社展開", subtitle: "クリックで根拠を確かめられる資料（例）" },
+    { type: "headerCards", title: "試行の結果", takeaway: "3か月で**月1,440時間**の作業が減った", source: INTERACTIVE_SOURCE,
+      items: [{ title: "月1,440時間の削減", desc: "5部門・120人の3か月の試行で", icon: "clock" }, { title: "満足度4.3点", desc: "5点満点。8割が使い続けたい", icon: "smile" }, { title: "年間効果 約1億円", desc: "初年度の予算は2,400万円", icon: "yen" }],
+      details: [
+        { target: "takeaway", title: "月1,440時間の内訳", text: "資料作成と議事録で全体の7割を占める。", rows: [{ label: "資料作成", value: "620時間" }, { label: "議事録", value: "380時間" }, { label: "データ集計", value: "290時間" }, { label: "その他", value: "150時間" }], source: INTERACTIVE_SOURCE, note: "各部門の作業記録（試行前1か月と試行3か月目）の差。" },
+        { target: "items[1]", title: "満足度の分布", text: "「使い続けたい」が8割を超えた。", rows: [{ label: "5点", value: "46%" }, { label: "4点", value: "38%" }, { label: "3点以下", value: "16%" }], source: "試行後アンケート（n=120）" },
+        { target: "items[2]", title: "年間効果の出し方", text: "削減時間に平均の時間単価を掛けた試算。", rows: [{ label: "削減時間（年）", value: "17,280時間" }, { label: "時間単価", value: "5,800円" }, { label: "効果", value: "約1億円" }], note: "全社展開後の見込み。時間単価は社内の平均人件費から。" },
+      ] },
+    { type: "imageText", title: "作業ごとの削減時間", takeaway: "見方を変えても**資料作成**の効果が大きい", source: INTERACTIVE_SOURCE, imagePosition: "left",
+      image: { chartType: "rank", data: { title: "作業ごとの削減時間", unit: "時間", highlight: "資料作成", views: [
+        { label: "月の合計", items: [{ label: "資料作成", value: 620 }, { label: "議事録", value: 380 }, { label: "データ集計", value: 290 }, { label: "その他", value: 150 }] },
+        { label: "1人あたり", items: [{ label: "資料作成", value: 5.2 }, { label: "議事録", value: 3.2 }, { label: "データ集計", value: 2.4 }, { label: "その他", value: 1.3 }] },
+      ] } },
+      points: ["切り口を切り替えると並びが変わる", "どちらで見ても資料作成が1位"] },
+    { type: "imageText", title: "1件あたりの作業時間の変化", takeaway: "減ったのは**下書きと清書**で、確認の時間は残った", source: INTERACTIVE_SOURCE, imagePosition: "left",
+      image: { chartType: "shift", data: { title: "資料1件あたりの作業時間（分）", unit: "分", beforeLabel: "試行前", afterLabel: "試行後", items: [{ label: "下書き", before: 90, value: 35 }, { label: "清書", before: 60, value: 25 }, { label: "確認", before: 30, value: 28 }] } },
+      points: ["点線が減った分", "確認は人が担うので残る"] },
+    { type: "simulator", title: "全社に広げたときの試算", takeaway: "利用率を**8割**まで上げれば目標に届く", source: "試行の実績から試算",
+      inputs: [{ label: "利用する人数", value: 600, min: 120, max: 1200, step: 20, unit: "人" }, { label: "1人あたり削減", value: 12, min: 4, max: 20, step: 1, unit: "時間/月" }, { label: "利用率", value: 50, min: 10, max: 100, step: 5, unit: "%" }],
+      formula: "a × b × c ÷ 100", resultLabel: "月の削減時間", resultUnit: "時間", compareLabel: "目標", compareValue: 5000 },
+    { type: "gap", title: "目標までの不足と打ち手", takeaway: "3つの打ち手を重ねると**目標に届く**", source: "試行の実績から試算", unit: "時間",
+      targetLabel: "目標", target: 5000, currentLabel: "いまの見込み", current: 3600,
+      measures: [{ title: "業務別テンプレート", value: 600, desc: "部門ごとの指示文30種" }, { title: "各部の推進役", value: 500, desc: "身近な相談先を置く" }, { title: "入力ルール", value: 400, desc: "使ってよい情報を明示" }] },
+    { type: "gantt", title: "展開の計画", takeaway: "いまは**本社の準備**、12月から支社へ広げる", periods: ["10月", "11月", "12月", "1月", "2月", "3月"], now: 0.5,
+      items: [{ title: "本社", desc: "試行を拡大", start: 0, span: 2 }, { title: "支社", desc: "順に展開", start: 2, span: 2 }, { title: "全拠点", desc: "本格運用", start: 4, span: 2 }] },
+    { type: "closing", title: "お願いしたいこと", message: "10月の経営会議で、初年度予算2,400万円のご承認をお願いします" },
+  ],
+};
 const TEMPLATES = [
+  INTERACTIVE_TEMPLATE,
   {
     id: "exec", name: "役員報告（意思決定）", desc: "結論→根拠→計画→お願いの順で、判断をもらう", audience: "役員", purpose: "意思決定・報告",
     slides: [
@@ -4422,7 +4531,9 @@ function fromTemplate(template) {
   slides[0].date = new Date().toLocaleDateString("ja-JP", { year: "numeric", month: "long" });
   state.historyId = null;
   loadDeck(normalizeDeck({ title: slides[0].title, purpose: form.purpose || template.purpose, audience: form.audience || template.audience, theme: state.createTheme, slides }), { source: template.name });
-  toast("【】の部分を書き換えてください。構成チェックが残りを知らせます");
+  toast(JSON.stringify(template.slides).includes("【")
+    ? "【】の部分を書き換えてください。構成チェックが残りを知らせます"
+    : "記入例の資料です。発表（F5）でクリック・スライダーを試してから、数字と文言を自分の内容に置き換えてください");
 }
 
 function blankDeck() {

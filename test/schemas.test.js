@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { SLIDE_TYPES, codexChatSchema, codexDeckSchema, codexNotesSchema, codexOutlineSchema, codexSlideSchema, codexVariantsSchema } from "../server/schemas.mjs";
+import { SLIDE_TYPES, codexChatSchema, codexDeckSchema, codexNotesSchema, codexOutlineSchema, codexSlideSchema, codexVariantsSchema, slideSchema } from "../server/schemas.mjs";
 
 // Codex structured output uses strict JSON Schema: every object must forbid extra
 // keys and list every property as required, and array items must be one schema.
@@ -58,7 +58,23 @@ test("Codex output schemas satisfy strict structured-output rules", () => {
   }
   const motion = codexChatSchema.properties.motion.anyOf.find((option) => option.type === "object");
   assert.deepEqual(Object.keys(motion.properties).sort(), ["backdrop", "draw", "emphasis", "entrance", "hover", "kinetic"]);
+  // Pages the audience works with: evidence panels, rankings by view, before/after, simulators and gaps.
+  for (const schema of [codexDeckSchema, codexChatSchema, codexSlideSchema, codexVariantsSchema]) {
+    const text = JSON.stringify(schema);
+    for (const key of ["simulator", "gap", "rank", "shift", "views", "measures", "formula", "compareValue", "\"rows\"", "\"source\"", "\"note\"", "\"now\""]) assert.ok(text.includes(key.startsWith("\"") ? key : `"${key}"`), key);
+  }
   assert.equal(codexSlideSchema.type, "object");
-  assert.equal(SLIDE_TYPES.length, 42);
+  assert.equal(SLIDE_TYPES.length, 44);
   assert.ok(SLIDE_TYPES.includes("hero") && SLIDE_TYPES.includes("statement"));
+});
+
+test("interactive slides and evidence validate, and nonsense does not", () => {
+  const ok = (slide) => slideSchema.safeParse(slide).success;
+  assert.ok(ok({ type: "simulator", title: "試算", inputs: [{ label: "人数", value: 120, min: 50, max: 600 }], formula: "a × 12" }));
+  assert.ok(ok({ type: "gap", title: "不足", target: 3000, current: 1440, measures: [{ title: "テンプレート", value: 620 }] }));
+  assert.ok(ok({ type: "imageText", title: "順位", image: { chartType: "rank", data: { views: [{ label: "全体", items: [{ label: "A", value: 1 }] }] } } }));
+  assert.ok(ok({ type: "imageText", title: "差", image: { chartType: "shift", data: { items: [{ label: "A", before: 9, value: 4 }] } } }));
+  assert.ok(ok({ type: "kpi", title: "成果", source: "社内集計", items: [{ label: "時間", value: "1,440h" }], details: [{ target: "takeaway", text: "内訳", rows: [{ label: "資料", value: "620h" }], source: "記録", note: "3か月目" }] }));
+  assert.ok(!ok({ type: "simulator", title: "試算", inputs: [], formula: "a" }), "a simulator needs a condition");
+  assert.ok(!ok({ type: "gap", title: "不足", target: 3000, current: 1440, measures: [] }), "a gap needs a measure");
 });

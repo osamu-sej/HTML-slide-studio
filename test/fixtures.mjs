@@ -47,6 +47,10 @@ export const allLayoutSlides = [
   { type: "waterfall", ...base("内訳"), unit: "時間", items: [{ label: "資料作成", value: 150 }, { label: "議事録", value: 90 }, { label: "手戻り", value: -20 }, { label: "合計", value: 220, total: true }] },
   { type: "logicTree", ...base("要因分解"), root: "活用率の部門差", branches: [{ title: "業務との接点", items: ["棚卸しが未実施"], highlight: true }, { title: "相談先がない", items: ["推進役が不在", "離脱する"] }] },
   { type: "executiveSummary", ...base("サマリー"), conclusion: "全店展開を提案する", items: card(3), action: "予算承認を依頼する" },
+  { type: "imageText", ...base("切り口で並び替え"), source: "社内集計 2026年", image: { chartType: "rank", data: { title: "部門別の削減時間", unit: "時間", highlight: "営業", views: [{ label: "月合計", items: [{ label: "営業", value: 320 }, { label: "企画", value: 410 }, { label: "総務", value: 150 }] }, { label: "1人あたり", items: [{ label: "営業", value: 8 }, { label: "企画", value: 6 }, { label: "総務", value: 5 }] }] } }, points: ["1人あたりでは営業が最大"] },
+  { type: "imageText", ...base("前後の差"), image: { chartType: "shift", data: { title: "1件あたりの時間", unit: "分", beforeLabel: "前", afterLabel: "後", items: [{ label: "下書き", before: 90, value: 35 }, { label: "確認", before: 30, value: 28 }] } }, points: ["下書きが大きく減った"] },
+  { type: "simulator", ...base("試算"), inputs: [{ label: "人数", value: 120, min: 50, max: 600, step: 10, unit: "人" }, { label: "1人あたり", value: 12, min: 2, max: 30, unit: "時間" }], formula: "a × b", resultLabel: "月の削減時間", resultUnit: "時間", compareLabel: "目標", compareValue: 3000 },
+  { type: "gap", ...base("不足と打ち手"), unit: "時間", targetLabel: "目標", target: 3000, currentLabel: "現状", current: 1440, measures: [{ title: "テンプレート", value: 620, desc: "指示文30種" }, { title: "推進役", value: 540 }, { title: "入力ルール", value: 480 }] },
   { type: "closing", title: "次のアクション", message: "10月までに全店展開の計画を確定する" },
 ];
 
