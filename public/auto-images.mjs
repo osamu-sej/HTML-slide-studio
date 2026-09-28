@@ -1,4 +1,4 @@
-// A deck needs enough actual pictures, while charts and diagrams retain priority on data slides.
+// Aim for roughly one picture per three slides, while keeping charts and diagrams prominent.
 const PHOTO_SLOTS = new Set(["title", "section", "closing", "hero", "statement", "content", "quote", "imageText"]);
 const PHOTO_PRIORITY = {
   content: 90, hero: 85, imageText: 82, quote: 78, title: 74,
@@ -17,7 +17,7 @@ export function hasSlidePicture(slide) {
 
 export function picturePlan(deck) {
   const slides = deck.slides ?? deck.slideData ?? [];
-  const target = Math.ceil(slides.length / 2);
+  const target = slides.length ? Math.max(1, Math.round(slides.length / 3)) : 0;
   const present = slides.filter(hasSlidePicture).length;
   const candidates = slides.flatMap((slide, index) => {
     if (hasSlidePicture(slide)) return [];

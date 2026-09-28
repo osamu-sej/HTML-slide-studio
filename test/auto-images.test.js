@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { hasSlidePicture, picturePlan } from "../public/auto-images.mjs";
 
-test("picture plan fills half a deck and favors slides with photo slots", () => {
+test("picture plan fills about a third of a deck and favors slides with photo slots", () => {
   const slides = [
     { type: "title", title: "表紙" },
     { type: "imageText", image: { chartType: "bar", data: {} } },
@@ -13,9 +13,14 @@ test("picture plan fills half a deck and favors slides with photo slots", () => 
     { type: "closing", title: "次の行動" },
   ];
   const plan = picturePlan({ slides });
-  assert.deepEqual([plan.target, plan.present, plan.needed], [3, 1, 2]);
+  assert.deepEqual([plan.target, plan.present, plan.needed], [2, 1, 1]);
   assert.deepEqual(plan.candidates.slice(0, 2).map((item) => item.index), [2, 0]);
   assert.equal(plan.candidates.find((item) => item.index === 1).slotted, false);
+});
+
+test("ten slides target three pictures", () => {
+  assert.equal(picturePlan({ slides: Array.from({ length: 10 }, () => ({ type: "content" })) }).target, 3);
+  assert.equal(picturePlan({ slides: [] }).target, 0);
 });
 
 test("charts and videos are not counted as pictures", () => {
