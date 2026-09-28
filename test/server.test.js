@@ -134,6 +134,9 @@ test("app shell, engine, assets and security headers", async () => {
     assert.equal(looks.status, 200, "the studio and the server share one list of layout looks");
     assert.match(looks.headers.get("content-type"), /javascript/);
     assert.match(await looks.text(), /export function varietyIssues/);
+    const autoImages = await server.request("/auto-images.mjs");
+    assert.equal(autoImages.status, 200);
+    assert.match(await autoImages.text(), /export function picturePlan/);
 
     const sample = await (await server.request("/samples/ai-rollout.json")).json();
     assert.ok(sample.slideData.length >= 40);

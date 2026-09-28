@@ -1,4 +1,5 @@
 import { buildSearchIndex, deleteSavedDeck, getSavedDeck, listSavedDecks, putSavedDeck, searchSavedDecks, slideExcerpt } from "./saved-library.js";
+import { hasSlidePicture, picturePlan } from "./auto-images.mjs?v=__APP_VERSION__";
 import { LOOK_ADVICE, LOOKS, lookOf, varietyIssues } from "./layout-looks.mjs?v=__APP_VERSION__";
 
 /*
@@ -191,6 +192,7 @@ const state = {
   motionPreview: null,
   inline: null,
 };
+let autoImageRun = null;
 
 // ---------------------------------------------------------------- small helpers
 
@@ -358,6 +360,7 @@ async function checkCodexStatus() {
   renderInspector();
   renderChat();
   updateTopbar();
+  showImageCoverage();
 }
 
 async function submitPasscode(event) {
@@ -914,10 +917,13 @@ function slidePicture(slide, index, deck = state.deck) {
 // ---------------------------------------------------------------- deck lifecycle
 
 function loadDeck(deck, { source = "", keepUndo = false, imported = null, savedDeckId = null, selected = 0 } = {}) {
+  if (autoImageRun) autoImageRun.cancelled = true;
+  autoImageRun = null;
   stopMotionPreview({ render: false });
   state.imported = imported;
   if (!keepUndo && state.deck) pushUndo();
   state.deck = deck;
+  showImageCoverage();
   state.selected = keepUndo ? Math.min(state.selected, deck.slides.length - 1) : Math.max(0, Math.min(selected, deck.slides.length - 1));
   state.savedDeckId = savedDeckId;
   $("deckTitleInput").value = deck.title;
@@ -2844,6 +2850,86 @@ function renderCreateThemes() {
 
 // ---------------------------------------------------------------- AI jobs
 
+function showImageCoverage() {
+  if (autoImageRun || !state.deck) return;
+  const plan = picturePlan(state.deck);
+  $("autoImageStatus").textContent = state.codexImageAuthorized ? `画像 ${plan.present}/${state.deck.slides.length}枚` : "";
+  $("autoImageAction").textContent = "画像を追加";
+  $("autoImageAction").classList.toggle("hidden", !state.codexImageAuthorized || !plan.needed);
+  $("autoImageAction").disabled = false;
+}
+
+function showAutoImageProgress(run) {
+  if (autoImageRun !== run) return;
+  const present = picturePlan(run.deck).present;
+  const active = !run.cancelled && (run.inFlight > 0 || (present < run.target && run.next < run.candidates.length));
+  $("autoImageStatus").textContent = run.cancelled && run.inFlight ? "画像生成を停止中"
+    : active
+    ? `画像を生成中 ${present}/${run.target}枚${run.failures ? `（失敗 ${run.failures}件）` : ""}`
+    : present >= run.target ? `画像 ${present}/${run.deck.slides.length}枚` : `画像 ${present}/${run.target}枚・未完了`;
+  $("autoImageAction").textContent = active ? "停止" : "再試行";
+  $("autoImageAction").classList.toggle("hidden", present >= run.target || (run.cancelled && run.inFlight > 0));
+}
+
+async function requestAutoImage(deck, index) {
+  const { jobId } = await jsonFetch("/api/decks/image", {
+    method: "POST",
+    body: JSON.stringify({ deck: serverDeck(deck), index, message: "この1枚の主張と具体的な本文に直接合う画像を新規生成してください。文字・ロゴ・数値・グラフは描かず、内容にない人物や成果も加えないでください。" }),
+  });
+  const job = await new Promise((resolve, reject) => watchJob(jobId, {
+    onDone: resolve,
+    onFail: (failed) => reject(new Error(failed.error || failed.detail || "画像生成に失敗しました")),
+  }));
+  if (!job.image?.url) throw new Error("生成画像が返されませんでした");
+  const response = await fetch(job.image.url, { credentials: "same-origin" });
+  if (!response.ok) throw new Error(`画像の取得に失敗しました（${response.status}）`);
+  return putMedia(await response.blob(), `自動生成_${index + 1}枚目`);
+}
+
+async function autoIllustrateDeck(deck) {
+  const plan = picturePlan(deck);
+  if (!plan.needed || state.deck !== deck) return;
+  if (!state.codexImageAuthorized) {
+    $("autoImageStatus").textContent = "画像の追加生成にはCodex接続が必要です";
+    return;
+  }
+  if (autoImageRun) autoImageRun.cancelled = true;
+  const run = { deck, target: plan.target, candidates: plan.candidates, next: 0, inFlight: 0, failures: 0, cancelled: false };
+  autoImageRun = run;
+  showAutoImageProgress(run);
+  const worker = async () => {
+    while (!run.cancelled && state.deck === deck) {
+      if (picturePlan(deck).present + run.inFlight >= run.target) break;
+      const candidate = run.candidates[run.next++];
+      if (!candidate) break;
+      const slide = deck.slides[candidate.index];
+      if (hasSlidePicture(slide)) continue;
+      const before = JSON.stringify(slide);
+      run.inFlight += 1;
+      showAutoImageProgress(run);
+      try {
+        const src = await requestAutoImage(deck, candidate.index);
+        if (run.cancelled || state.deck !== deck || deck.slides[candidate.index] !== slide || JSON.stringify(slide) !== before) continue;
+        pushUndo();
+        setSlideMedia(slide, { src, kind: "image", name: "スライドに合わせた生成画像" }, candidate.slotted ? null : { x: 0.79, y: 0.08, w: 0.17, h: 0.19 });
+        if (!slide.photoMotion) slide.photoMotion = "zoom";
+        markChanged({ structural: true });
+      } catch (error) {
+        run.failures += 1;
+        if (/401|認証|接続/.test(error.message)) run.cancelled = true;
+      } finally {
+        run.inFlight -= 1;
+        showAutoImageProgress(run);
+      }
+    }
+  };
+  await Promise.all([worker(), worker()]);
+  if (autoImageRun !== run) return;
+  showAutoImageProgress(run);
+  const present = picturePlan(deck).present;
+  toast(present >= run.target ? `${deck.slides.length}枚中${present}枚に画像を用意しました` : run.cancelled ? "画像生成を停止しました。残りは「再試行」で追加できます" : `画像は${present}/${run.target}枚です。残りは「再試行」で追加できます`);
+}
+
 let progressTimer = null;
 let progressStarted = 0;
 const STAGE_STEP = [[/受付|起動|送信/, 0], [/検討|骨子/, 1], [/書き出し|生成|作成/, 2], [/品質|修正|確認/, 3], [/完了|できました/, 4]];
@@ -2978,7 +3064,7 @@ async function generateDeck({ outline = null } = {}) {
         const deck = normalizeDeck(job.deck);
         deck.theme = theme;
         loadDeck(deck, { source: "Codex" });
-        afterGeneration();
+        afterGeneration().then(() => autoIllustrateDeck(deck)).catch((error) => toast(`画像の自動生成を開始できませんでした：${error.message}`));
       },
       onFail: (job) => {
         finishProgress("生成できませんでした", job.error || job.detail || "不明なエラー", true);
@@ -3003,7 +3089,7 @@ async function afterGeneration() {
   const over = state.deck.slides.map((_, i) => i).filter((i) => overflowFor(i).length);
   if (over.length && state.codexAuthorized) {
     toast(`${over.length}枚で文字が枠に収まりません。AIで順に短くしています`);
-    fixAllOverflow();
+    await fixAllOverflow();
   }
 }
 
@@ -4553,6 +4639,13 @@ function blankDeck() {
 // ---------------------------------------------------------------- wiring
 
 function bind() {
+  $("autoImageAction").addEventListener("click", () => {
+    const run = autoImageRun;
+    if (run && !run.cancelled && (run.inFlight || run.next < run.candidates.length)) {
+      run.cancelled = true;
+      showAutoImageProgress(run);
+    } else if (state.deck) autoIllustrateDeck(state.deck);
+  });
   $("createTab").addEventListener("click", () => setMode("create"));
   $("editTab").addEventListener("click", () => { if (state.deck) { setMode("edit"); renderAll(); } });
   $("resumeEditBtn").addEventListener("click", () => { setMode("edit"); renderAll(); });

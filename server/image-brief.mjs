@@ -1,6 +1,9 @@
 /** Turn a slide's data structure into a visual brief; title alone is never enough. */
+import { slideMeaning } from "./visual-relevance.mjs";
+
 export function imageBrief(slide) {
   const claim = slide.takeaway || slide.message || slide.title || "";
+  const body = slideMeaning(slide).replace(claim, "").trim().slice(0, 500);
   if (slide.type === "gantt") {
     const periods = slide.periods || [];
     const steps = (slide.items || []).map((item) => {
@@ -24,5 +27,5 @@ export function imageBrief(slide) {
   if (slide.type === "timeline") {
     return `このページは時系列。主張「${claim}」。順序: ${(slide.milestones || []).map((m) => `${m.date}: ${m.label}`).join(" → ")}。重要な変化を1場面で表現する。`;
   }
-  return `このページの主張は「${claim}」。具体的な被写体・行動は本文から選ぶ。本文にない人物・会議・商品・成果を足さない。`;
+  return `このページの主張は「${claim}」。本文の具体的内容: ${body || "主張を表す一場面"}。本文に書かれた対象・場所・行動から、主張が伝わる一場面を選ぶ。図表や数字を画像内に描き直さない。本文にない人物・会議・商品・成果を足さない。`;
 }
