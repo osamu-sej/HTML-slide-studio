@@ -92,7 +92,7 @@ const DENSITY_GUIDE = {
   rich: { label: "多め", rule: "1枚4〜5要素、説明は各30〜50字。背景・根拠・具体例・実行条件・リスクまで素材の範囲で掘り下げる" },
 };
 
-const PERSONA = "あなたは経営層向けの資料に強いプレゼンテーション設計者です。資料はHTMLのプレゼンテーションとして画面共有（Zoomなど）で発表され、項目が順に現れる・写真がゆっくり動く・クリックで詳細が開くといった動きを使えます。";
+const PERSONA = "あなたは経営層向けの資料に強いプレゼンテーション設計者です。資料はHTMLのプレゼンテーションとして画面共有（Zoomなど）で発表され、項目が順に現れる・写真がゆっくり動く・クリックで根拠が開く・切り口を切り替える・条件を動かして試算するといった動きを使えます。";
 
 const LAYOUT_GUIDE = [
   "利用可能なtypeと主要フィールド（すべての本文typeに title と takeaway を入れる）:",
@@ -105,7 +105,7 @@ const LAYOUT_GUIDE = [
   "- diagram: lanes[{title, items[]}]（2〜4レーン、各1〜4項目）",
   "- cycle: items[{label, subLabel}]、centerText",
   "- cards / headerCards / bulletCards / grid2x2 / headerTwoColumn / headerThreeSummary(summary付き) / stepUp / triangle / venn / roadmap / orgChart(root付き) / checklist(items[].done) / matrix(xLabel, yLabel。右上が狙う領域) / swot(強み・弱み・機会・脅威の順): items[{title, desc, icon}]",
-  "- gantt: periods[]（期間ラベル）、items[{title, desc, start(0始まりの期間番号), span(期間数)}]",
+  "- gantt: periods[]（期間ラベル）、items[{title, desc, start(0始まりの期間番号), span(期間数)}]、now（任意。「いま」の位置。1.5＝2つ目の期間の真ん中。今の時点が分かるときだけ）",
   "- waterfall（合計の内訳・増減の要因）: unit（単位）、items[{label, value（数値。減少はマイナス）, total（合計・起点の棒はtrue）}]（2〜8本。素材にある数値だけ）",
   "- logicTree（原因分解・論点分解）: root（課題）、branches[{title（10字程度）, items[]（葉。各16字以内・最大3個）, highlight（手を打つ枝だけtrue）}]（2〜4本）",
   "- table: headers[], rows[][]（最大5列×6行、セルは14字以内）",
@@ -115,6 +115,10 @@ const LAYOUT_GUIDE = [
   "- pyramid / funnel: levels[{title, description}]（3〜5段）",
   "- quote: text, author ／ faq: items[{q, a}]（最大4問） ／ executiveSummary: conclusion, items[{title, desc}]（2〜3個）, action",
   "- imageText: points[]、image={chartType: bar|line|donut|multi-line|stacked-bar|100-stacked-bar, data:{title, items[{label, value}] または xAxisLabels + series[{label, values[]}]}}",
+  "  - image.chartType=rank（切り口で並び替わる順位）: data:{title, unit, highlight（主役の項目名）, views[{label（切り口の名前。例：全体・一次請け、2024年度・2025年度）, items[{label, value}]}]（2〜4個）}。発表中は切り口のボタンで全部の棒が並び替わる。同じ項目名を各切り口で使う",
+  "  - image.chartType=shift（前後の差）: data:{title, unit, beforeLabel, afterLabel, items[{label, before, value（後の値）}]}（2〜6本）。発表中は棒が前から後へ形を変え、減った（増えた）分が点線で残る",
+  "- simulator（原因と結果・試算）: inputs[{label, value（いまの値）, min, max, step, unit}]（1〜3個。上から a・b・c）、formula（a・b・c と + - × ÷ ( ) と数字だけ。例: a × b × c ÷ 100）、resultLabel、resultUnit、compareLabel と compareValue（目標・現状など比べる値。任意）。発表中はスライダーを動かすと結果と差が計算し直され、式が画面に出る。素材の数値を初期値にし、試算であることを takeaway か notes に書く",
+  "- gap（不足と打ち手）: unit、targetLabel・target（目標）、currentLabel・current（現状）、measures[{title, value（上乗せ量）, desc}]（1〜5個）。発表中はクリックのたびに打ち手が1つずつオンになり、目標までの不足が埋まっていく（クリックでオン・オフもできる）",
   "- hero（全面写真に大きな一文。章の始まりや印象づけたい場面に。資料全体で1〜2枚まで）: title（一文で言い切る）, takeaway（補足）, visualAsset（写真）",
   "- statement（大きな一文だけのスライド。問いかけ・決意・転換点に）: title（小見出し）, text（40字以内の一文。**語句** で1か所強調）",
   "- title: title, subtitle, date ／ section: title, takeaway ／ closing: title, message（次のアクション。2〜3個なら改行で区切ると番号付きの列になる）",
@@ -127,7 +131,16 @@ const LAYOUT_GUIDE = [
   "- emphasis（このスライドの **語句** の強調の見せ方。通常は省略）: auto / marker（マーカーを引く）/ underline（下線）/ circle（手書きの丸で囲む）/ box（枠で囲む）/ glow（光らせる）/ none（色だけ）",
   "- transition（このスライドへ切り替わるときだけの動き。通常は省略して資料の設定に任せる）: auto / none / fade / slide / zoom / morph / wipe / circle / push（下から押し上げる）/ flip（カードのように裏返る）/ dive（奥へ飛び込む）/ blinds（ブラインドが開く）/ curtain（幕が中央から開く）。章の変わり目など、場面が変わる1〜2枚だけ",
   "- drillOf（深掘りページ）: このスライドを本編の流れから外し、直前の本編スライドの項目（items[1]、steps[0] など details の target と同じ書き方）をクリックしたときだけ開くページにする。本編の番号には数えず、発表中は Esc・← で元のスライドに戻る。1つの項目に深掘りページは1枚まで、深掘りページからさらに深掘りはしない。頼まれたときだけ作り、既存の drillOf のあるスライドは消さない・動かさない・drillOf を外さない",
-  "- details（その項目をクリックすると開く補足カード）: [{target（項目の配列名と0始まりの番号。例: items[0]、steps[2]、milestones[1]、levels[0]、points[1]、branches[0]、leftItems[0]、stats[0]、rows[0]）, title（任意・20字以内）, text（120字以内）}]。スライドの本文は短いまま、話しながら見せたい根拠・具体例・内訳・数値の出所を text に書く（素材にない数値は書かない）。既存の details は頼まれない限りそのまま残す",
+  "- details（その項目をクリックすると開く補足カード）: [{target（項目の配列名と0始まりの番号。例: items[0]、steps[2]、milestones[1]、levels[0]、points[1]、branches[0]、leftItems[0]、stats[0]、rows[0]、measures[0]。キーメッセージの根拠なら takeaway）, title（任意・20字以内）, text（判断を1〜2文・120字以内）, rows（任意。内訳 [{label, value}] 最大8行。value は単位つきの文字）, source（任意。出所）, note（任意。前提・注記）}]。rows・source・note のどれかがあると、右から根拠パネルとして開く。スライドの本文は短いまま、話しながら見せたい根拠・具体例・内訳・数値の出所を書く（素材にない数値は書かない）。既存の details は頼まれない限りそのまま残す",
+  "- source（本文スライドの出所。任意・40字程度）: 素材に出所・調査名・時点があるスライドだけ。ページ下とグラフの吹き出しに出る",
+  "動く資料（1枚1操作）: 見出しが言いたいことの構造で、そのページで見る人が自分の手で確かめる操作を1つだけ選ぶ（動きは思いつきで付けない。見出しと関係ない動きは入れない）",
+  "- 結論と根拠 → 押すと根拠が出る（details に rows・source を付けた根拠パネル。数字のある本文スライドのほぼ全部に付けてよい。target=takeaway ならキーメッセージの根拠）",
+  "- 切り口（分類・順位） → 切り替えると並び替わる（imageText の chartType=rank）",
+  "- 差分（前後・比較） → 形が変わり、差が残る（imageText の chartType=shift）",
+  "- 原因と結果（試算・感度） → 条件を動かすと計算し直す（simulator）",
+  "- 不足と打ち手 → オン・オフで不足が埋まる（gap）",
+  "- 流れと時間（工程・計画） → 順に組み上がる（process・timeline・gantt などの animation=click。gantt は now で「いま」を示す）",
+  "- 1ページの操作は1つだけ（simulator・gap・rank・shift のスライドに click や spotlight を重ねない）。素材の数字がないのに simulator・gap・rank・shift を作らない",
 ];
 
 const CAPACITY_GUIDE = [
@@ -238,7 +251,7 @@ export function buildChatPrompt({ deck, message, history = [], current = 0, focu
     "- 頼まれていないスライドは変えない。直すときは必要最小限にする",
     "- 変更前に、資料の目的→各スライドの役割→対象スライドの主張と根拠→前後とのつながりを確認する。本文を読まずに見出しだけで判断しない",
     "- 指示が曖昧でも、現在のスライドと直近の会話から対象を特定する。明確な対象がない場合は勝手に広げず、質問する",
-    "- 「動きをつけて」「クリックで詳しく」「写真を動かして」などは animation・details・photoMotion で応える。「モーショングラフィック」「文字を動かして」「背景を動かして」「もっと派手に」は kinetic・backdrop・entrance（1枚なら各スライド、全体なら motion）で応える。「1つずつ注目させて」は animation の spotlight、「強調を丸で囲んで」などは emphasis、「このスライドだけ切り替えを変えて」はそのスライドの transition で応える。動画やLottieアニメーションはユーザーが画面の「写真・動画・アニメーション」から追加するもので、あなたは入れられない",
+    "- 「動きをつけて」「クリックで詳しく」「写真を動かして」などは animation・details・photoMotion で応える。「モーショングラフィック」「文字を動かして」「背景を動かして」「もっと派手に」は kinetic・backdrop・entrance（1枚なら各スライド、全体なら motion）で応える。「1つずつ注目させて」は animation の spotlight、「強調を丸で囲んで」などは emphasis、「このスライドだけ切り替えを変えて」はそのスライドの transition で応える。「クリックで確かめられるように」「動く資料にして」は、見出しの構造に合う操作を1つ（根拠パネル・rank・shift・simulator・gap・click）で応える。「根拠を出して」「内訳を見せて」は details の rows・source、「条件を変えて試算したい」は simulator、「打ち手で埋まるのを見せたい」は gap、「切り口を切り替えたい」は chartType=rank、「前後の差を見せたい」は chartType=shift。動画やLottieアニメーションはユーザーが画面の「写真・動画・アニメーション」から追加するもので、あなたは入れられない",
     "- 写真は、ユーザーが明示的に求めたときだけ新規選択・変更する。見た目を良くする依頼でも、無関係な素材を足さずレイアウト・余白・情報の強弱を優先する",
     "- 1枚目は title、最後は closing のままにする。表紙と最後は削除・移動しない",
     "- 「〇〇を深掘りするページを作って」「クリックで詳しいページに飛べるように」と頼まれたら、元のスライドの後ろに insert し、content に drillOf（元のスライドの項目。例: items[1]）を入れる。本文はその項目の背景・内訳・具体例・根拠で、元のスライドの繰り返しにしない。drillOf のあるスライド（深掘りページ）は本編の流れに入らないので、順番の入れ替えや枚数の話では数えない",
@@ -391,6 +404,7 @@ export function buildDeckPrompt(input) {
     "- 研修・勉強会資料では、理解から実行へ進む物語（背景→要点→比較→手順→注意点→次アクション）を優先する",
     "- 素材にスライドへ載せきれない補足（根拠・具体例・内訳・数値の出所）があるときは、その項目の details に書く（資料全体で3〜6か所まで。本文はそのぶん短くする）",
     "- animation は基本的に省略（auto）。発表者が話しながら1つずつ見せたい工程・計画・原因分解だけ click を指定してよい",
+    "- 動く資料: 素材に数字と出所がある本文スライドには、見出しの構造に合う操作を1つ付ける（上の「動く資料（1枚1操作）」）。数字のある本文スライドの details には rows・source を入れて根拠パネルにし、出所があれば slide の source も入れる。rank・shift・simulator・gap は素材の数字で作れるときだけ、資料全体で合わせて1〜3枚",
     "- モーショングラフィック: 表紙（title）・章扉（section）・closing には、資料の話題に合う backdrop を1種類選んで同じものを付ける（AI・テクノロジー→orbits、データ・DX→grid、つながり・業務の流れ→lines、ビジョン→gradient、研修・キックオフ→shapes か particles）。kinetic は省略（自動で mask）してよく、研修・キックオフなら chars、問いかけの statement なら type を使ってよい",
     "- 最後のclosingには、誰が・いつまでに・何をするかが分かる具体的な次のアクションを入れる",
     "- 各スライドに、発表者が読み上げられる自然な notes（2〜4文）を付ける",

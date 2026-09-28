@@ -199,7 +199,8 @@
   /** Start a slide's entrance. With a click build, `step` groups are already shown (going back shows all). */
   function play(slide, { step = 0, animate = true } = {}) {
     slide.classList.remove("hs-play");
-    const click = slide.dataset.build === "click";
+    const toggling = measuresBuild(slide, step);
+    const click = slide.dataset.build === "click" && !toggling;
     for (const el of slide.querySelectorAll("[data-g]")) {
       el.classList.remove("hs-in");
       el.classList.toggle("hs-hidden", click && Number(el.dataset.g) >= step);
@@ -223,8 +224,25 @@
     return true;
   }
 
+  /**
+   * On a "gap" slide a click build turns the measures on one per click (everything stays on screen): step 0
+   * shows the gap, the last step shows it filled. Starting a slide sets every switch; a click only turns the
+   * next measure on, so measures the presenter switched by hand stay as they are. False for any other slide.
+   */
+  function measuresBuild(slide, step, { exact = true } = {}) {
+    if (slide.dataset.build !== "click" || !slide.querySelector("[data-measure]")) return false;
+    for (const el of slide.querySelectorAll("[data-measure]")) {
+      const n = Number(el.dataset.measure);
+      if (exact) el.classList.toggle("is-on", n < step);
+      else if (n === step - 1) el.classList.add("is-on");
+    }
+    E.gapUpdate(slide);
+    return true;
+  }
+
   /** Show the next click step (1-based: step 1 shows group 0). */
   function reveal(slide, step) {
+    if (measuresBuild(slide, step, { exact: false })) return;
     // In a spotlight build the item in focus counts its figure up again.
     if (spotlight(slide, step)) { for (const el of slide.querySelectorAll(".hs-spot")) countWithin(el, 120); return; }
     for (const el of slide.querySelectorAll(`[data-g="${step - 1}"]`)) {
@@ -343,8 +361,28 @@
     return { x: (r.left - base.left) / k, y: (r.top - base.top) / k, w: r.width / k, h: r.height / k };
   }
 
+  /** A detail's breakdown: bars when every value is a figure, otherwise a two-column list. */
+  function evidenceRows(rows) {
+    const nums = rows.map((row) => { const parts = E.numParts(row.value); return parts.num == null ? null : Number(parts.num.replace(/[^\d.]/g, "")); });
+    const bars = nums.every((n) => n != null && Number.isFinite(n));
+    const max = bars ? Math.max(...nums, 0) || 1 : 1;
+    return h("ul", { class: ["hs-ev-rows", bars ? "bars" : ""] }, rows.map((row, i) => h("li", { style: { "--i": i } },
+      h("span", { class: "hs-ev-label" }, E.strip(row.label)),
+      bars ? h("span", { class: "hs-ev-track" }, h("i", { style: { width: `${(nums[i] / max) * 100}%` } })) : null,
+      h("span", { class: "hs-ev-value" }, E.strip(row.value)))));
+  }
+
+  /** The words that name an item (its title), without its badges. */
+  function nameOf(el) {
+    if (!el) return "";
+    const copy = el.cloneNode(true);
+    copy.querySelectorAll(".hs-detail-badge, .hs-drill-badge").forEach((badge) => badge.remove());
+    const title = copy.querySelector(".hs-card-title, .hs-row-title, .hs-mlabel, .hs-label, .hs-tree-branch, .lab, .hs-rank-label");
+    return E.strip((title || copy).textContent).replace(/\s+/g, " ").slice(0, 28);
+  }
+
   /** Wire a presented slide. Returns a function that removes everything again. */
-  function activate(slide, { details = [], onOpen, onClose, onDrill } = {}) {
+  function activate(slide, { details = [], onOpen, onClose, onDrill, onControl } = {}) {
     const overlay = slide.querySelector(".hs-overlay");
     let hotKey = null;
     let tip = null;
@@ -360,7 +398,8 @@
     };
     const showTip = (mark, event) => {
       if (!tip) { tip = h("div", { class: "hs-tip" }); overlay.append(tip); }
-      tip.textContent = mark.dataset.tip;
+      // Value and name, and where the figure comes from when the slide says so.
+      tip.replaceChildren(h("span", {}, mark.dataset.tip), slide.dataset.source ? h("small", {}, `出所：${slide.dataset.source}`) : null);
       const [x, y] = toSlide(slide, event.clientX, event.clientY);
       tip.style.left = `${Math.max(120, Math.min(E.W - 120, x))}px`;
       tip.style.top = `${Math.max(90, y)}px`;
@@ -404,11 +443,44 @@
       }
     };
     const onLeave = () => { setHot(null); hideTip(); };
+    const anchorOf = (target) => (target === "takeaway" ? slide.querySelector('[data-detail="takeaway"]')
+      : [...slide.querySelectorAll(`[data-item="${E.cssEscape(target)}"]`)].find((el) => !(el instanceof SVGElement)) || slide.querySelector(`[data-item="${E.cssEscape(target)}"]`));
+    // Evidence (a breakdown, a source, assumptions) slides in from the right over a dimmed slide.
+    const openPanel = (detail) => {
+      const rows = (detail.rows || []).filter((row) => row && E.strip(row.label));
+      const source = E.strip(detail.source || "");
+      const note = E.strip(detail.note || "");
+      const where = [E.strip(slide.querySelector(".hs-title")?.textContent || ""), detail.target === "takeaway" ? "キーメッセージの根拠" : nameOf(anchorOf(detail.target))].filter(Boolean).join(" › ");
+      const tabs = [rows.length ? ["rows", "内訳"] : null, source || note ? ["source", "出所と前提"] : null].filter(Boolean);
+      const close = (event) => { event.stopPropagation(); closeDetail(); };
+      const panel = h("aside", { class: "hs-evidence", role: "dialog", "aria-label": E.strip(detail.title || "根拠") },
+        h("button", { class: "hs-popover-close", type: "button", "aria-label": "閉じる", onclick: close }, "×"),
+        h("div", { class: "hs-ev-where" }, where),
+        detail.title ? h("div", { class: "hs-ev-title" }, E.strip(detail.title)) : null,
+        h("div", { class: "hs-ev-text" }, E.rich(detail.text)),
+        tabs.length > 1 ? h("div", { class: "hs-ev-tabs", role: "tablist" }, tabs.map(([key, label], i) => h("button", { type: "button", role: "tab", "data-tab": key, "aria-selected": String(i === 0) }, label))) : null,
+        rows.length ? h("div", { class: "hs-ev-pane", "data-pane": "rows" }, evidenceRows(rows)) : null,
+        source || note ? h("div", { class: "hs-ev-pane", "data-pane": "source", hidden: rows.length > 0 },
+          note ? h("p", { class: "hs-ev-note" }, E.rich(detail.note)) : null,
+          source ? h("p", { class: "hs-ev-source" }, `出所：${source}`) : null) : null,
+        source && rows.length ? h("div", { class: "hs-ev-foot" }, `出所：${source}`) : null);
+      panel.addEventListener("click", (event) => {
+        event.stopPropagation();
+        const tab = event.target.closest?.("[data-tab]");
+        if (!tab) return;
+        for (const other of panel.querySelectorAll("[data-tab]")) other.setAttribute("aria-selected", String(other === tab));
+        for (const pane of panel.querySelectorAll("[data-pane]")) pane.hidden = pane.dataset.pane !== tab.dataset.tab;
+      });
+      overlay.append(h("div", { class: "hs-scrim dim", onclick: close }), panel);
+      slide.dataset.detailOpen = detail.target;
+      onOpen?.(detail);
+    };
     const openDetail = (target) => {
       const detail = details.find((entry) => entry.target === target);
       if (!detail) return;
       closeDetail();
-      const anchor = [...slide.querySelectorAll(`[data-item="${E.cssEscape(target)}"]`)].find((el) => !(el instanceof SVGElement)) || slide.querySelector(`[data-item="${E.cssEscape(target)}"]`);
+      if ((detail.rows || []).length || detail.source || detail.note) { openPanel(detail); return; }
+      const anchor = anchorOf(target);
       const box = anchor ? rectIn(slide, anchor) : { x: 700, y: 300, w: 200, h: 100 };
       const width = 760;
       const scrim = h("div", { class: "hs-scrim", onclick: (event) => { event.stopPropagation(); closeDetail(); } });
@@ -426,10 +498,20 @@
       onOpen?.(detail);
     };
     const closeDetail = () => {
-      overlay.querySelectorAll(".hs-popover, .hs-scrim").forEach((el) => el.remove());
+      overlay.querySelectorAll(".hs-popover, .hs-scrim, .hs-evidence").forEach((el) => el.remove());
       if (slide.dataset.detailOpen) { delete slide.dataset.detailOpen; onClose?.(); }
     };
     const onClick = (event) => {
+      // Controls change the slide in place (and never advance it): a view of a ranking, a measure switched on or off.
+      const control = event.target.closest?.(".hs-control");
+      if (control && !event.target.closest(".hs-popover, .hs-evidence")) {
+        event.stopPropagation();
+        const view = event.target.closest("[data-view]");
+        if (view) { E.rankShow(view.closest(".hs-rank"), Number(view.dataset.view)); onControl?.("view"); }
+        const measure = event.target.closest("[data-measure]");
+        if (measure) { measure.classList.toggle("is-on"); E.gapUpdate(slide); onControl?.("measure"); }
+        return;
+      }
       const drill = event.target.closest?.("[data-drill]");
       if (drill && onDrill && !event.target.closest(".hs-popover")) {
         event.stopPropagation();
@@ -458,10 +540,15 @@
       // Clicks inside the card reach its buttons (×); the card itself keeps them from advancing the slide.
       if (event.target.closest?.("iframe")) event.stopPropagation();
     };
+    // Sliders recalculate as they move; letting go hands the keys back to the presentation.
+    const onInput = (event) => { if (event.target.matches?.("input[data-sim]")) { E.simUpdate(slide); onControl?.("slider"); } };
+    const onChange = (event) => { if (event.target.matches?.("input[data-sim]")) event.target.blur(); };
     slide.addEventListener("pointerover", onOver);
     slide.addEventListener("pointermove", onMove);
     slide.addEventListener("pointerleave", onLeave);
     slide.addEventListener("click", onClick, true);
+    slide.addEventListener("input", onInput);
+    slide.addEventListener("change", onChange);
     return {
       openDetail,
       closeDetail,
@@ -472,6 +559,8 @@
         slide.removeEventListener("pointermove", onMove);
         slide.removeEventListener("pointerleave", onLeave);
         slide.removeEventListener("click", onClick, true);
+        slide.removeEventListener("input", onInput);
+        slide.removeEventListener("change", onChange);
       },
     };
   }
@@ -497,8 +586,9 @@
 
   /**
    * A presentation in `host` (the studio's presenter overlay or an exported file's body).
-   * opts: { deck, start, step, fitFor(i), renderOptions, onChange({index, step}), onClose(), closable, keyboard }
+   * opts: { deck, start, step, fitFor(i), renderOptions, onChange({index, step}), onClose(), closable, keyboard, static }
    * The story is the slides without `drillOf`; a deep-dive page opens from its item and returns to where it left.
+   * `static` shows every slide finished (no motion, every step shown), like the "reduce motion" setting.
    */
   function createPlayer(host, opts) {
     const deck = opts.deck;
@@ -521,6 +611,8 @@
     // While a deep-dive page is shown: the slide (and build step) to go back to, and where it was opened from.
     let back = null;
     let hinted = false;
+    let demoRun = null;
+    const still = Boolean(opts.static);
     const started = Date.now();
 
     const stage = h("div", { class: "hs-player-stage" });
@@ -533,7 +625,8 @@
       counter,
       btn("›", "次へ（→・クリック）", () => next()),
       h("span", { class: "hs-player-spacer" }),
-      btn("一覧", "スライド一覧（G）", () => toggleGrid()),
+      btn("一覧", "スライド一覧（O・G）", () => toggleGrid()),
+      btn("自動デモ", "自動デモ：矢印が各ページを操作して見せます（D）", () => demo(), "demo"),
       btn("ノート", "ノートを表示（N）", () => toggleNotes()),
       btn("発表者ビュー", "別ウィンドウにノート・次のスライド・経過時間（P）", () => openPresenterView()),
       btn("全画面", "全画面（F）", () => toggleFullscreen()),
@@ -579,20 +672,23 @@
       index = i;
       const next = renderAt(i);
       const slide = next.firstElementChild;
-      step = Math.min(atStep ?? (fullStep ? Infinity : 0), stepsOf(slide));
+      step = Math.min(still ? Infinity : atStep ?? (fullStep ? Infinity : 0), stepsOf(slide));
       // A slide may have its own way in; going back plays the way in of the slide being left, in reverse.
       const own = slides[dir < 0 ? from : i]?.transition;
-      const type = reduced() || !prevScaler ? "none" : via || (TRANSITIONS.has(own) ? own : transition);
+      const type = still || reduced() || !prevScaler ? "none" : via || (TRANSITIONS.has(own) ? own : transition);
       // A deep-dive page grows out of the item that opened it, and shrinks back into it.
       if (type === "drill" && at) for (const el of [next, prevScaler]) { el.style.setProperty("--ox", `${at.x}px`); el.style.setProperty("--oy", `${at.y}px`); }
       const enter = () => {
         // Coming back from a deep-dive page, the slide is shown as it was left, without its entrance again.
-        play(slide, { step, animate: atStep == null });
+        play(slide, { step, animate: atStep == null && !still });
         interaction = activate(slide, { details: slides[i]?.details || [], onDrill: back ? null : (to, el) => openDrill(to, el) });
         playMedia(slide, { sound: gesture });
-        // The first slide with clickable items says how to use them (once per presentation).
-        const kinds = [slide.querySelector(".hs-detail-badge") ? "「＋ 詳しく」" : "", slide.querySelector(".hs-drill-badge") ? "「↗ 深掘り」" : ""].filter(Boolean).join("・");
+        if (still) return;
+        // The first slide with clickable items says how to use them (once per presentation), and every page
+        // rings what can be clicked once, right after it has arrived.
+        const kinds = [slide.querySelector(".hs-detail-badge") ? "「＋ 詳しく」" : "", slide.querySelector(".hs-drill-badge") ? "「↗ 深掘り」" : "", slide.querySelector(".hs-control") ? "切り替え・スライダー" : ""].filter(Boolean).join("・");
         if (kinds && !hinted) { hinted = true; setTimeout(() => flash(`${kinds}の付いた項目はクリックできます`), 900); }
+        setTimeout(() => ring(slide), atStep == null ? 1900 : 300);
       };
       if (type === "morph" && doc.startViewTransition) {
         nameShared(prevScaler, true);
@@ -774,7 +870,11 @@
         if (!box) return;
         if (i == null || i >= total) { box.replaceChildren(d.createTextNode("（最後のスライドです）")); return; }
         const el = E.render(slides[i], { ...(opts.renderOptions || {}), deck, index: i, mode: "thumb", fit: opts.fitFor?.(i) });
-        if (stepShown != null && el.dataset.build === "click") for (const g of el.querySelectorAll("[data-g]")) g.style.visibility = Number(g.dataset.g) < stepShown ? "" : "hidden";
+        // Click steps not yet reached are hidden (a gap slide's measures are switched off instead).
+        if (stepShown != null && el.dataset.build === "click") {
+          if (el.querySelector("[data-measure]")) { for (const m of el.querySelectorAll("[data-measure]")) m.classList.toggle("is-on", Number(m.dataset.measure) < stepShown); E.gapUpdate(el); }
+          else for (const g of el.querySelectorAll("[data-g]")) g.style.visibility = Number(g.dataset.g) < stepShown ? "" : "hidden";
+        }
         el.style.position = "absolute";
         el.style.transformOrigin = "0 0";
         box.replaceChildren(d.adoptNode(el));
@@ -785,6 +885,106 @@
       d.querySelector(".pv-notes").textContent = E.strip(slides[index]?.notes || "") || "（このスライドにノートはありません）";
       d.querySelector(".pv-count").textContent = `${place(index) + 1} / ${order.length}${back ? " ・ 深掘り" : ""}${stepsOf(current?.firstElementChild || d.body) ? `　（${step}/${stepsOf(current.firstElementChild)}）` : ""}`;
       layoutPresenterView();
+    }
+
+    /** One ring around each thing on the slide that can be clicked or moved (once, when the page has arrived). */
+    function ring(slide) {
+      if (!slide.isConnected || current?.firstElementChild !== slide || reduced()) return;
+      const overlay = slide.querySelector(".hs-overlay");
+      const targets = [...slide.querySelectorAll("[data-detail], [data-drill], .hs-rank-views, .hs-sim-input input, .hs-gap-measure")]
+        .filter((el) => !(el instanceof SVGElement) && !el.closest(".hs-hidden") && !el.parentElement?.closest("[data-detail], [data-drill]")).slice(0, 10);
+      for (const el of targets) {
+        const box = rectIn(slide, el);
+        if (!box.w || !box.h) continue;
+        const mark = h("span", { class: "hs-ring", "aria-hidden": "true", style: { left: `${box.x - 10}px`, top: `${box.y - 10}px`, width: `${box.w + 20}px`, height: `${box.h + 20}px` } });
+        overlay.append(mark);
+        setTimeout(() => mark.remove(), 1600);
+      }
+    }
+
+    // ---- automatic demo (D): an arrow walks through every page and does what the page invites, then ends on the overview
+    function stopDemo(message = "自動デモを止めました") {
+      if (!demoRun) return;
+      demoRun.stopped = true;
+      demoRun.cursor.remove();
+      demoRun = null;
+      player.classList.remove("in-demo");
+      if (message) flash(message);
+    }
+
+    async function demo() {
+      if (demoRun) { stopDemo(); return; }
+      if (!grid.hidden) toggleGrid();
+      const run = { stopped: false, cursor: h("div", { class: "hs-demo-cursor", "aria-hidden": "true" }) };
+      run.cursor.innerHTML = '<svg viewBox="0 0 32 32"><path d="M5 3 L5 25 L11 19.5 L15 29 L19.5 27 L15.5 18 L23 18 Z"/></svg>';
+      demoRun = run;
+      player.append(run.cursor);
+      player.classList.add("in-demo");
+      const wait = (ms) => new Promise((resolve, reject) => setTimeout(() => (run.stopped ? reject(new Error("stopped")) : resolve()), ms));
+      const moveTo = (el, { x = 0.5, y = 0.5 } = {}) => {
+        const base = player.getBoundingClientRect();
+        const r = el.getBoundingClientRect();
+        run.cursor.style.transform = `translate(${r.left - base.left + r.width * x}px, ${r.top - base.top + r.height * y}px)`;
+      };
+      const pointAt = async (el, where) => { moveTo(el, where); await wait(700); };
+      const tap = async (el, fn, where) => {
+        await pointAt(el, where);
+        run.cursor.classList.add("tap");
+        fn();
+        await wait(220);
+        run.cursor.classList.remove("tap");
+      };
+      const slideNow = () => current?.firstElementChild;
+      flash("自動デモ：D・Esc・クリックで止まります");
+      try {
+        for (;;) {
+          await wait(2400);
+          let slide = slideNow();
+          // Steps: items that appear (or measures that switch on) one per click.
+          while (slide && step < stepsOf(slide)) {
+            const target = slide.querySelector(`[data-measure="${step}"]`) || [...slide.querySelectorAll(`[data-g="${step}"]`)].find((el) => el.getBoundingClientRect().width);
+            if (target) await tap(target, () => next()); else next();
+            await wait(900);
+            slide = slideNow();
+          }
+          // Views of a ranking.
+          for (const tab of [...(slide?.querySelectorAll("[data-view]") || [])].slice(1)) { await tap(tab, () => tab.click()); await wait(1500); }
+          // Sliders: to the far end and back.
+          for (const range of slide?.querySelectorAll("input[data-sim]") || []) {
+            const from = Number(range.value);
+            const min = Number(range.min);
+            const max = Number(range.max);
+            const to = from + (max - min) * 0.35 <= max ? from + (max - min) * 0.35 : min + (max - min) * 0.25;
+            const at = (v) => ({ x: (v - min) / (max - min || 1), y: 0.5 });
+            await pointAt(range, at(from));
+            run.cursor.classList.add("drag");
+            for (let k = 1; k <= 30; k += 1) {
+              range.value = String(from + ((to - from) * k) / 30);
+              range.dispatchEvent(new Event("input", { bubbles: true }));
+              moveTo(range, at(Number(range.value)));
+              await wait(45);
+            }
+            run.cursor.classList.remove("drag");
+            await wait(1400);
+            range.value = String(from);
+            range.dispatchEvent(new Event("input", { bubbles: true }));
+            await wait(500);
+          }
+          // One piece of evidence, opened and closed again.
+          const host = slide?.querySelector("[data-detail]");
+          if (host && interaction) {
+            await tap(host, () => interaction.openDetail(host.dataset.detail), { x: 0.9, y: 0.2 });
+            await wait(3200);
+            interaction.closeDetail();
+            await wait(500);
+          }
+          if (place(index) >= order.length - 1 && !back) break;
+          next();
+        }
+        await wait(1600);
+        stopDemo(null);
+        toggleGrid();
+      } catch { /* stopped */ }
     }
 
     function flash(text) {
@@ -799,6 +999,10 @@
       if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
       const key = event.key;
       gesture = true;
+      if (key === "d" || key === "D") { demo(); return; }
+      if (demoRun) { stopDemo(); if (key === "Escape") return; }
+      // A slider in use keeps its arrow keys.
+      if (event.target?.matches?.("input[data-sim]") && /^Arrow/.test(key)) return;
       if (["ArrowRight", "ArrowDown", "PageDown", " ", "Enter"].includes(key)) {
         event.preventDefault();
         if (key === "Enter" && digits) { go(order[Math.min(order.length, Math.max(1, Number(digits))) - 1]); digits = ""; return; }
@@ -815,19 +1019,19 @@
         else if (opts.closable !== false) close();
       } else if (key === "f" || key === "F") toggleFullscreen();
       else if (key === "n" || key === "N") toggleNotes();
-      else if (key === "g" || key === "G") toggleGrid();
+      else if (key === "g" || key === "G" || key === "o" || key === "O") toggleGrid();
       else if (key === "p" || key === "P") openPresenterView();
       else if (key === "b" || key === "B" || key === ".") { black.style.background = "#000"; black.hidden = !black.hidden; }
       else if (key === "w" || key === "W") { black.style.background = "#fff"; black.hidden = !black.hidden; }
     }
     const onStageClick = (event) => {
-      if (event.target.closest(".hs-player-bar, .hs-player-grid, .hs-player-notes")) return;
+      if (event.target.closest(".hs-player-bar, .hs-player-grid, .hs-player-notes, .hs-control")) return;
       gesture = true;
       origin = { x: event.clientX, y: event.clientY };
       next();
     };
     let touchX = null;
-    const onTouchStart = (event) => { touchX = event.touches[0]?.clientX ?? null; };
+    const onTouchStart = (event) => { touchX = event.target.closest?.(".hs-control") ? null : event.touches[0]?.clientX ?? null; };
     const onTouchEnd = (event) => {
       if (touchX == null) return;
       const dx = (event.changedTouches[0]?.clientX ?? touchX) - touchX;
@@ -845,9 +1049,12 @@
     stage.addEventListener("touchstart", onTouchStart, { passive: true });
     stage.addEventListener("touchend", onTouchEnd);
     player.addEventListener("pointermove", onMove);
+    // The audience's own click stops the automatic demo (the demo's clicks are not "trusted").
+    player.addEventListener("pointerdown", (event) => { if (event.isTrusted && demoRun && !event.target.closest?.(".hs-player-btn.demo")) stopDemo(); }, true);
     onMove();
 
     function destroy() {
+      if (demoRun) demoRun.stopped = true;
       doc.removeEventListener("keydown", onKey);
       interaction?.destroy();
       if (current?.firstElementChild) stopMedia(current.firstElementChild);
@@ -862,7 +1069,7 @@
     player.focus({ preventScroll: true });
 
     return {
-      el: player, next, prev, go, destroy, close, toggleNotes, toggleGrid, toggleFullscreen, openPresenterView, openDrill, closeDrill,
+      el: player, next, prev, go, destroy, close, toggleNotes, toggleGrid, toggleFullscreen, openPresenterView, openDrill, closeDrill, demo, stopDemo,
       get index() { return index; }, get step() { return step; }, get startedAt() { return started; }, get inDrill() { return Boolean(back); },
     };
   }

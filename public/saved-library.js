@@ -3,7 +3,7 @@ const STORE = "decks";
 const SKIP_FIELDS = new Set([
   "media", "customImage", "src", "visualAsset", "imagePlacement", "photoMotion",
   "animation", "kinetic", "backdrop", "entrance", "emphasis", "icon", "type",
-  "chartType", "fit", "kind", "imagePosition", "target", "theme", "transition",
+  "chartType", "fit", "kind", "imagePosition", "target", "theme", "transition", "formula",
 ]);
 
 export function normalizeSearch(text) {

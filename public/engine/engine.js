@@ -1,6 +1,6 @@
 /*
  * HTML Slide Studio — slide engine.
- * Turns a deck (JSON) into 1920×1080 HTML slides: themes, 42 layouts, SVG charts, text fitting.
+ * Turns a deck (JSON) into 1920×1080 HTML slides: themes, 44 layouts, SVG charts, text fitting.
  * Motion and the presentation player live in motion.js; both attach to window.SlideEngine.
  * The file is also inlined into exported presentations, so it has no dependencies.
  */
@@ -55,10 +55,12 @@
     bulletCards: "要点カード", headerTwoColumn: "2列比較", headerThreeSummary: "3列＋まとめ", grid2x2: "2×2グリッド", matrix: "マトリクス",
     swot: "SWOT", diagram: "レーン図", cycle: "サイクル", pyramid: "ピラミッド", funnel: "ファネル", stepUp: "ステップアップ",
     triangle: "トライアングル", venn: "ベン図", orgChart: "組織図", checklist: "チェックリスト", faq: "FAQ", quote: "引用",
+    simulator: "試算（条件を動かす）", gap: "不足と打ち手",
   };
 
   // Builds: step-by-step content appears on click, parallel content cascades in, the rest fades once.
-  const CLICK = new Set(["process", "processList", "flowChart", "stepUp", "timeline", "roadmap", "cycle", "pyramid", "funnel", "gantt", "waterfall", "logicTree"]);
+  // A "gap" slide turns its measures on one per click instead (see motion.js).
+  const CLICK = new Set(["process", "processList", "flowChart", "stepUp", "timeline", "roadmap", "cycle", "pyramid", "funnel", "gantt", "waterfall", "logicTree", "gap"]);
   const CASCADE = new Set(["cards", "headerCards", "bulletCards", "kpi", "dashboard", "grid2x2", "swot", "matrix", "triangle", "venn", "orgChart",
     "checklist", "faq", "agenda", "executiveSummary", "headerTwoColumn", "headerThreeSummary", "statsCompare", "compare", "beforeAfter", "diagram", "content"]);
   const STILL = new Set(["title", "section", "closing", "hero", "statement"]);
@@ -350,8 +352,11 @@
   }
 
   function chart(spec, { w = 900, h: ht = 560, key = "image" } = {}) {
-    const model = chartModel(spec);
     const wrap = h("div", { class: "hs-chart-wrap", style: { display: "flex", "flex-direction": "column", flex: "1", "min-height": "0", "min-width": "0" } });
+    // Charts the audience works with are HTML, so their bars can move between states.
+    if (spec?.chartType === "rank") { wrap.append(rankChart(spec, key)); return wrap; }
+    if (spec?.chartType === "shift") { wrap.append(shiftChart(spec, key)); return wrap; }
+    const model = chartModel(spec);
     const legendNames = model.type === "donut" ? model.labels : model.series.length > 1 ? model.series.map((serie) => serie.name) : [];
     if (legendNames.length > 1 && model.type !== "donut") {
       wrap.append(h("div", { class: "hs-legend" }, legendNames.map((name, i) => h("span", { style: { "--c": SERIES[i % SERIES.length] } }, h("i"), name))));
@@ -548,6 +553,209 @@
       if (!percent) svg.append(s("text", { class: "hs-val", x: x + bw / 2, y: y0 - (totals[i] / max) * plotH - 14, "text-anchor": "middle" }, fmt(totals[i])));
       svg.append(s("text", { x: x + bw / 2, y: y0 + 40, "text-anchor": "middle" }, label.length > 8 ? `${label.slice(0, 7)}…` : label));
     });
+  }
+
+  // ---------------------------------------------------------------- charts the audience works with
+  // Each page lets the audience check its headline with one action, chosen by what the headline says:
+  // a ranking re-sorts when the view changes (切り口), bars move from before to after (差分), a result is
+  // recalculated when a condition moves (因果: simulator), measures fill a gap when switched on (不足と打ち手).
+
+  const numberOf = (value) => { const n = Number(value); return value === "" || value == null || !Number.isFinite(n) ? null : n; };
+  const inputValue = (input) => numberOf(input.value !== undefined && input.value !== "" ? input.value : input.getAttribute("value")) ?? 0;
+  /** Figures with sensible decimals: 1,440 / 12.5 / 0.83 (or exactly `digits`). */
+  function fmtNum(value, digits = null) {
+    const d = Number.isInteger(digits) ? digits : Math.abs(value) >= 100 ? 0 : Math.abs(value) >= 10 ? 1 : 2;
+    return Number(value).toLocaleString("ja-JP", { maximumFractionDigits: d, minimumFractionDigits: 0 });
+  }
+
+  /** A ranking that re-sorts when the audience switches the view (by year, by measure, by who counts). */
+  function rankChart(spec, key) {
+    const data = spec?.data || {};
+    const views = arr(data.views).filter((view) => arr(view?.items).length).slice(0, 4);
+    const labels = [...new Set(views.flatMap((view) => arr(view.items).map((it) => strip(it?.label))).filter(Boolean))].slice(0, 12);
+    const hot = strip(data.highlight || "");
+    const box = h("div", { class: ["hs-rank", hot && labels.includes(hot) ? "has-hot" : ""], "data-field": key, "data-unit": strip(data.unit || ""), style: { "--n": Math.max(1, labels.length) } },
+      views.length > 1 ? h("div", { class: "hs-rank-views hs-control", role: "tablist", "aria-label": "切り口" },
+        views.map((view, i) => h("button", { type: "button", role: "tab", "data-view": String(i), "aria-selected": String(i === 0) }, strip(view.label) || `切り口${i + 1}`))) : null,
+      h("div", { class: "hs-rank-rows" }, labels.map((label) => {
+        const values = {};
+        views.forEach((view, vi) => {
+          const n = numberOf(arr(view.items).find((it) => strip(it?.label) === label)?.value);
+          if (n != null) values[`data-v${vi}`] = String(n);
+        });
+        return h("div", { class: ["hs-rank-row", "hs-mark", label === hot ? "is-hot" : ""], "data-label": label, ...values },
+          h("span", { class: "hs-rank-no" }), h("span", { class: "hs-rank-label" }, label),
+          h("span", { class: "hs-rank-track" }, h("i", { class: "hs-rank-bar" })), h("span", { class: "hs-rank-val" }));
+      })));
+    rankShow(box, 0);
+    return box;
+  }
+
+  /** Show view `vi` of a ranking: rows move to their new places, bars change length, items without a value go last. */
+  function rankShow(box, vi) {
+    if (!box) return;
+    const rows = [...box.querySelectorAll(".hs-rank-row")];
+    const unit = box.dataset.unit || "";
+    const valueOf = (row) => numberOf(row.getAttribute(`data-v${vi}`));
+    const max = Math.max(...rows.map((row) => Math.abs(valueOf(row) ?? 0)), 0) || 1;
+    const sorted = [...rows].sort((a, b) => (valueOf(b) ?? -Infinity) - (valueOf(a) ?? -Infinity));
+    sorted.forEach((row, rank) => {
+      const value = valueOf(row);
+      const text = value == null ? "データなし" : `${fmt(value)}${unit}`;
+      row.style.setProperty("--r", String(rank));
+      row.classList.toggle("is-top", rank === 0 && value != null);
+      row.classList.toggle("is-empty", value == null);
+      row.querySelector(".hs-rank-no").textContent = value == null ? "—" : String(rank + 1);
+      row.querySelector(".hs-rank-bar").style.width = `${value == null ? 0 : Math.max(0.8, (Math.max(0, value) / max) * 100)}%`;
+      row.querySelector(".hs-rank-val").textContent = text;
+      row.dataset.tip = `${row.dataset.label}：${text}${value == null ? "" : `（${rank + 1}位）`}`;
+    });
+    for (const tab of box.querySelectorAll("[data-view]")) tab.setAttribute("aria-selected", String(Number(tab.dataset.view) === vi));
+    box.dataset.view = String(vi);
+  }
+
+  /** Before → after: each bar moves from its old length to the new one; the old length stays as a dashed outline. */
+  function shiftChart(spec, key) {
+    const data = spec?.data || {};
+    const unit = strip(data.unit || "");
+    const pairs = arr(data.items).filter((it) => strip(it?.label)).slice(0, 8)
+      .map((it) => ({ label: strip(it.label), before: numberOf(it.before) ?? 0, after: numberOf(it.value) ?? 0 }));
+    const max = niceMax(Math.max(...pairs.flatMap((p) => [p.before, p.after]), 0) * 1.02);
+    const deltas = pairs.map((p) => p.after - p.before);
+    const biggest = Math.max(...deltas.map(Math.abs), 0);
+    const pct = (v) => `${(Math.max(0, v) / max) * 100}%`;
+    const signed = (d) => `${d > 0 ? "+" : d < 0 ? "−" : "±"}${fmt(Math.abs(d))}`;
+    return h("div", { class: "hs-shift", "data-field": key },
+      h("div", { class: "hs-legend hs-shift-legend" },
+        h("span", {}, h("i", { class: "ghost" }), strip(data.beforeLabel) || "前"),
+        h("span", {}, h("i"), strip(data.afterLabel) || "後")),
+      h("div", { class: "hs-shift-rows" }, pairs.map((p, i) => h("div", {
+        class: ["hs-shift-row", "hs-mark", biggest > 0 && Math.abs(deltas[i]) === biggest ? "is-hot" : ""], style: { "--i": i },
+        "data-tip": `${p.label}：${fmt(p.before)} → ${fmt(p.after)}${unit}（${signed(deltas[i])}${unit}）`,
+      },
+      h("span", { class: "hs-shift-label" }, p.label),
+      h("span", { class: "hs-shift-track" },
+        h("i", { class: "hs-shift-ghost", style: { width: pct(p.before) } }),
+        h("i", { class: "hs-shift-bar", style: { "--from": pct(p.before), "--to": pct(p.after) } })),
+      h("span", { class: "hs-shift-nums" }, h("span", { class: "hs-shift-after" }, `${fmt(p.after)}${unit}`), h("span", { class: "hs-shift-delta" }, signed(deltas[i])))))));
+  }
+
+  // Simulator formulas: numbers, the conditions a, b, c (in order), + − × ÷ and parentheses. They are parsed
+  // here, never evaluated as code (exported files forbid eval, and the formula comes from the deck).
+  const FORMULA_OPS = { "+": "+", "-": "-", "−": "-", "*": "*", "×": "*", "/": "/", "÷": "/", "(": "(", ")": ")" };
+  function formulaTokens(formula) {
+    const text = str(formula).normalize("NFKC").toLowerCase();
+    const tokens = [];
+    for (let i = 0; i < text.length;) {
+      const ch = text[i];
+      if (/\s/.test(ch)) { i += 1; continue; }
+      const num = /^\d+(?:\.\d+)?/.exec(text.slice(i));
+      if (num) { tokens.push({ kind: "num", value: Number(num[0]) }); i += num[0].length; continue; }
+      if (/[a-c]/.test(ch)) { tokens.push({ kind: "var", name: ch }); i += 1; continue; }
+      const op = FORMULA_OPS[ch];
+      if (!op) return null;
+      tokens.push({ kind: op === "(" || op === ")" ? op : "op", op });
+      i += 1;
+    }
+    return tokens;
+  }
+
+  /** The value of a formula for { a, b, c }, or NaN when it cannot be read. */
+  function evalFormula(formula, vars = {}) {
+    const tokens = formulaTokens(formula);
+    if (!tokens?.length) return NaN;
+    let i = 0;
+    const isOp = (...ops) => tokens[i]?.kind === "op" && ops.includes(tokens[i].op);
+    const atom = () => {
+      const tok = tokens[i++];
+      if (tok?.kind === "num") return tok.value;
+      if (tok?.kind === "var") { if (!Number.isFinite(vars[tok.name])) throw new Error("var"); return vars[tok.name]; }
+      if (tok?.kind === "(") { const v = sum(); if (tokens[i++]?.kind !== ")") throw new Error(")"); return v; }
+      throw new Error("token");
+    };
+    const unary = () => { if (isOp("-")) { i += 1; return -unary(); } if (isOp("+")) { i += 1; return unary(); } return atom(); };
+    const product = () => { let v = unary(); while (isOp("*", "/")) { const op = tokens[i++].op; const r = unary(); v = op === "*" ? v * r : v / r; } return v; };
+    const sum = () => { let v = product(); while (isOp("+", "-")) { const op = tokens[i++].op; const r = product(); v = op === "+" ? v + r : v - r; } return v; };
+    try {
+      const value = sum();
+      return i === tokens.length && Number.isFinite(value) ? value : NaN;
+    } catch { return NaN; }
+  }
+
+  /** "a × b ÷ 100" shown with the conditions' names. */
+  function formulaView(formula, inputs, result) {
+    const tokens = formulaTokens(formula);
+    if (!tokens?.length || !Number.isFinite(evalFormula(formula, { a: 1, b: 1, c: 1 }))) return h("span", { class: "hs-sim-eq bad" }, "式を読み取れません（a・b・c と + − × ÷ で書きます）");
+    const line = h("span", { class: "hs-sim-eq" }, h("span", { class: "hs-sim-eq-result" }, result), " ＝ ");
+    const symbol = { "+": "＋", "-": "−", "*": "×", "/": "÷" };
+    for (const tok of tokens) {
+      if (tok.kind === "var") line.append(h("span", { class: "hs-sim-chip" }, strip(inputs["abc".indexOf(tok.name)]?.label) || tok.name.toUpperCase()));
+      else if (tok.kind === "num") line.append(h("span", { class: "hs-sim-k" }, fmt(tok.value)));
+      else line.append(h("span", { class: "hs-sim-op" }, tok.kind === "op" ? ` ${symbol[tok.op]} ` : tok.kind));
+    }
+    return line;
+  }
+
+  /** Recalculate a simulator from its sliders (the engine draws the first state; motion.js calls this on input). */
+  function simUpdate(scope) {
+    const box = scope?.classList?.contains("hs-sim") ? scope : scope?.querySelector?.(".hs-sim");
+    if (!box) return NaN;
+    const vars = {};
+    for (const range of box.querySelectorAll("input[data-sim]")) {
+      const i = Number(range.dataset.sim);
+      const value = inputValue(range);
+      vars["abc"[i]] = value;
+      const min = numberOf(range.getAttribute("min")) ?? 0;
+      const max = numberOf(range.getAttribute("max")) ?? 1;
+      range.style.setProperty("--fill", `${clamp(((value - min) / (max - min || 1)) * 100, 0, 100)}%`);
+      const shown = box.querySelector(`[data-sim-show="${i}"]`);
+      if (shown) shown.textContent = fmtNum(value);
+    }
+    const result = evalFormula(box.dataset.formula, vars);
+    const digits = numberOf(box.dataset.digits);
+    const unit = box.dataset.unit || "";
+    const scale = Number(box.dataset.scale) || 1;
+    const ok = Number.isFinite(result);
+    box.querySelector(".hs-sim-out").textContent = ok ? fmtNum(result, digits) : "—";
+    const bar = box.querySelector(".hs-sim-barrow.now .hs-sim-bar");
+    if (bar) bar.style.width = `${ok ? Math.min(100, (Math.abs(result) / scale) * 100) : 0}%`;
+    const barValue = box.querySelector(".hs-sim-barrow.now .hs-sim-barval");
+    if (barValue) barValue.textContent = ok ? `${fmtNum(result, digits)}${unit}` : "—";
+    const compare = numberOf(box.dataset.compare);
+    const diff = box.querySelector(".hs-sim-diff");
+    if (diff && compare != null && ok) {
+      const d = result - compare;
+      const name = box.dataset.compareLabel || "比べる値";
+      diff.textContent = d >= 0 ? `${name}を ${fmtNum(d, digits)}${unit} 上回る` : `${name}まで あと ${fmtNum(-d, digits)}${unit}`;
+      box.classList.toggle("is-met", d >= 0);
+    }
+    box.dataset.result = ok ? String(result) : "";
+    return result;
+  }
+
+  /** Redraw a gap slide from which measures are on: the bar fills, and what is still missing (or the surplus) is shown. */
+  function gapUpdate(scope) {
+    const box = scope?.classList?.contains("hs-gap") ? scope : scope?.querySelector?.(".hs-gap");
+    if (!box) return;
+    const scale = Number(box.dataset.scale) || 1;
+    const target = Number(box.dataset.target) || 0;
+    const unit = box.dataset.unit || "";
+    const on = new Set([...box.querySelectorAll("[data-measure].is-on")].map((el) => el.dataset.measure));
+    let reach = Number(box.dataset.current) || 0;
+    for (const seg of box.querySelectorAll("[data-seg]")) {
+      const value = on.has(seg.dataset.seg) ? Number(seg.dataset.value) || 0 : 0;
+      seg.style.width = `${(value / scale) * 100}%`;
+      seg.classList.toggle("is-on", value > 0);
+      reach += value;
+    }
+    for (const el of box.querySelectorAll("[data-measure]")) el.setAttribute("aria-checked", String(el.classList.contains("is-on")));
+    const missing = Math.max(0, target - reach);
+    const round = (v) => fmt(Math.round(v * 100) / 100);
+    box.querySelector(".hs-gap-rest").style.width = `${(missing / scale) * 100}%`;
+    box.classList.toggle("is-met", missing <= 0);
+    box.querySelector(".hs-gap-state").textContent = missing > 0 ? "目標まで あと" : reach > target ? "目標を上回る" : "目標に到達";
+    box.querySelector(".hs-gap-num").textContent = missing > 0 ? round(missing) : `+${round(reach - target)}`;
+    box.querySelector(".hs-gap-reach").textContent = `現状と打ち手で ${round(reach)}${unit}`;
   }
 
   // ---------------------------------------------------------------- slide chrome
@@ -869,7 +1077,12 @@
         grid.append(item(`items[${i}]`, { class: "hs-gt" }, t("span", "", it.title, `items[${i}].title`)));
         grid.append(item(`items[${i}]`, { class: "hs-gtrack" }, h("div", { class: "hs-gbar", style: { "--s": start, "--n": span, "--i": i } }, strip(it.desc || ""))));
       });
-      return body("", grid);
+      // "いま": where today falls on the plan (1.5 = the middle of the second period).
+      const now = numberOf(slide.now);
+      if (now == null) return body("", grid);
+      grid.append(h("div", { class: "hs-gnow", style: { "--at": clamp(now, 0, p) }, "aria-hidden": "true" }, h("span", {}, "いま")));
+      // The line spans the chart only, so the chart sits in the middle of the page instead of filling it.
+      return body("", h("div", { class: "hs-gantt-center" }, grid));
     },
 
     orgChart(slide) {
@@ -986,6 +1199,84 @@
           h("ul", { class: ["hs-tree-leaves", branch.highlight ? "hot" : ""] }, arr(branch.items).map((leaf, li) => t("li", "", leaf, `branches[${i}].items[${li}]`)))));
       });
       return body("", h("div", { class: "hs-tree" }, svg, nodes));
+    },
+
+    // 因果: move a condition and the result is recalculated, with the formula on screen.
+    simulator(slide) {
+      const inputs = arr(slide.inputs).slice(0, 3);
+      const names = ["a", "b", "c"];
+      const unit = strip(slide.resultUnit || "");
+      const compare = numberOf(slide.compareValue);
+      const valueAt = (pick) => evalFormula(slide.formula, Object.fromEntries(inputs.map((input, i) => [names[i], numberOf(pick(input)) ?? 0])));
+      // The bars share one scale: the largest result any combination of the sliders' ends can reach.
+      let peak = Math.abs(valueAt((input) => input.value)) || 0;
+      for (let mask = 0; mask < 2 ** inputs.length; mask += 1) {
+        const v = evalFormula(slide.formula, Object.fromEntries(inputs.map((input, i) => [names[i], numberOf((mask >> i) & 1 ? input.max : input.min) ?? 0])));
+        if (Number.isFinite(v)) peak = Math.max(peak, Math.abs(v));
+      }
+      if (compare != null) peak = Math.max(peak, Math.abs(compare));
+      const resultLabel = strip(slide.resultLabel) || "試算の結果";
+      const box = h("div", {
+        class: "hs-sim", "data-formula": str(slide.formula), "data-scale": String(peak * 1.04 || 1), "data-unit": unit,
+        "data-digits": Number.isInteger(slide.digits) ? String(slide.digits) : "", "data-compare": compare == null ? "" : String(compare), "data-compare-label": strip(slide.compareLabel || ""),
+      },
+      h("div", { class: "hs-sim-main", "data-step": "" },
+        h("div", { class: "hs-sim-head" }, t("span", "hs-label", resultLabel, "resultLabel"), h("span", { class: "hs-sim-tag" }, "試算")),
+        h("div", { class: "hs-sim-result" }, h("span", { class: "hs-num hs-sim-out" }), unit ? h("span", { class: "hs-unit" }, unit) : null),
+        compare != null ? h("div", { class: "hs-sim-diff" }) : null,
+        h("div", { class: "hs-sim-bars" },
+          h("div", { class: "hs-sim-barrow now" }, h("span", { class: "hs-sim-barname" }, "試算"), h("span", { class: "hs-sim-track" }, h("i", { class: "hs-sim-bar" })), h("span", { class: "hs-sim-barval" })),
+          compare != null ? h("div", { class: "hs-sim-barrow compare" }, t("span", "hs-sim-barname", slide.compareLabel || "比べる値", "compareLabel"),
+            h("span", { class: "hs-sim-track" }, h("i", { class: "hs-sim-bar", style: { width: `${(Math.abs(compare) / (peak * 1.04 || 1)) * 100}%` } })), h("span", { class: "hs-sim-barval" }, `${fmtNum(compare, numberOf(slide.digits))}${unit}`)) : null),
+        h("div", { class: "hs-sim-formula" }, h("span", { class: "hs-sim-formula-label" }, "計算式"), formulaView(slide.formula, inputs, resultLabel))),
+      h("div", { class: "hs-sim-panel" }, inputs.map((input, i) => {
+        const min = numberOf(input.min) ?? 0;
+        const max = numberOf(input.max) ?? Math.max(min + 1, (numberOf(input.value) ?? 0) * 2);
+        const value = clamp(numberOf(input.value) ?? min, Math.min(min, max), Math.max(min, max));
+        const step = numberOf(input.step) || 10 ** Math.floor(Math.log10(Math.abs(max - min) / 50 || 1));
+        const u = strip(input.unit || "");
+        return item(`inputs[${i}]`, { class: "hs-sim-input" },
+          h("div", { class: "hs-sim-input-head" },
+            h("span", { class: "hs-sim-var" }, names[i].toUpperCase()),
+            t("span", "hs-card-title", input.label, `inputs[${i}].label`),
+            h("span", { class: "hs-sim-input-value" }, h("span", { class: "hs-sim-input-num", "data-sim-show": String(i) }, fmtNum(value)), u ? h("span", {}, u) : null)),
+          h("input", { class: "hs-control hs-range", type: "range", min, max, step, value, "data-sim": String(i), "aria-label": strip(input.label) || names[i] }),
+          h("div", { class: "hs-sim-range" }, h("span", {}, `${fmtNum(min)}${u}`), h("span", {}, `${fmtNum(max)}${u}`)));
+      })));
+      simUpdate(box);
+      return body("", box);
+    },
+
+    // 不足と打ち手: switch the measures on and the gap to the target fills (or stays).
+    gap(slide) {
+      const unit = strip(slide.unit || "");
+      const target = numberOf(slide.target) ?? 0;
+      const current = numberOf(slide.current) ?? 0;
+      const measures = arr(slide.measures).slice(0, 5);
+      const values = measures.map((m) => Math.max(0, numberOf(m?.value) ?? 0));
+      const scale = Math.max(target, current + values.reduce((a, b) => a + b, 0), 1) * 1.06;
+      const pct = (v) => `${(Math.max(0, v) / scale) * 100}%`;
+      const box = h("div", { class: "hs-gap", "data-target": String(target), "data-current": String(current), "data-scale": String(scale), "data-unit": unit },
+        h("div", { class: "hs-gap-readout" },
+          h("span", { class: "hs-gap-state" }),
+          h("span", { class: "hs-gap-amount" }, h("span", { class: "hs-num hs-gap-num" }), unit ? h("span", { class: "hs-unit" }, unit) : null),
+          h("span", { class: "hs-gap-reach" })),
+        h("div", { class: "hs-gap-chart" },
+          h("div", { class: "hs-gap-track" },
+            h("span", { class: "hs-gap-seg current", style: { width: pct(current) } }, h("span", { class: "hs-gap-seglabel" }, `${strip(slide.currentLabel) || "現状"} ${fmt(current)}`)),
+            measures.map((m, i) => h("span", { class: "hs-gap-seg measure", "data-item": `measures[${i}]`, "data-seg": String(i), "data-value": String(values[i]), style: { "--mix": `${Math.round(100 - (i * 50) / Math.max(1, measures.length))}%` } },
+              h("span", { class: "hs-gap-seglabel" }, `+${fmt(values[i])}`))),
+            h("span", { class: "hs-gap-rest" }, h("span", { class: "hs-gap-seglabel" }, "不足"))),
+          h("div", { class: "hs-gap-target", style: { left: pct(target) } },
+            h("span", {}, t("span", "", slide.targetLabel || "目標", "targetLabel"), ` ${fmt(target)}${unit}`))),
+        h("div", { class: "hs-gap-measures", style: { "--n": Math.max(1, measures.length) } }, measures.map((m, i) => item(`measures[${i}]`, {
+          class: "hs-gap-measure hs-control is-on", role: "switch", "aria-checked": "true", "data-measure": String(i), "data-value": String(values[i]), style: { "--mix": `${Math.round(100 - (i * 50) / Math.max(1, measures.length))}%` },
+        },
+        h("div", { class: "hs-gap-measure-top" }, h("span", { class: "hs-switch", "aria-hidden": "true" }, h("i")), h("span", { class: "hs-gap-plus" }, `+${fmt(values[i])}${unit}`)),
+        t("div", "hs-card-title", m?.title, `measures[${i}].title`),
+        m?.desc ? t("div", "hs-card-desc", m.desc, `measures[${i}].desc`) : null))));
+      gapUpdate(box);
+      return body("", box);
     },
 
     executiveSummary(slide) {
@@ -1419,7 +1710,12 @@
     }
     root.append(overlay);
     if (!["title", "section", "closing"].includes(type)) {
-      root.append(h("footer", { class: "hs-foot" }, h("span", {}, strip(deck.title || "")), h("span", { class: "hs-page" }, drillParent != null ? `${pad2(pageNo)} ・ 深掘り` : `${pad2(pageNo)} / ${pad2(total)}`)));
+      // Where the figures come from sits at the foot of the page (and in the chart tooltips); otherwise the deck's name.
+      const source = strip(slide?.source || "");
+      if (source) root.dataset.source = source;
+      root.append(h("footer", { class: "hs-foot" },
+        source ? h("span", { class: "hs-source", "data-field": "source" }, `出所：${source}`) : h("span", {}, strip(deck.title || "")),
+        h("span", { class: "hs-page" }, drillParent != null ? `${pad2(pageNo)} ・ 深掘り` : `${pad2(pageNo)} / ${pad2(total)}`)));
     }
     assignGroups(root, build);
     markDetails(root, slide);
@@ -1451,14 +1747,28 @@
     root.dataset.steps = String(build === "click" || build === "spotlight" ? keys.length : 0);
   }
 
-  /** Items with "click for details" text get a badge and open a card when clicked in a presentation. */
+  /**
+   * Items with "click for details" text get a badge and open a card when clicked in a presentation. Details with
+   * a breakdown, a source or assumptions open as an evidence panel from the right; "takeaway" puts the evidence
+   * for the slide's conclusion on the key message itself.
+   */
   function markDetails(root, slide) {
     for (const detail of arr(slide?.details)) {
       if (!detail || !strip(detail.text)) continue;
+      const badge = (label) => h("span", { class: "hs-detail-badge", "aria-hidden": "true" }, plusIcon(), h("span", { class: "hs-badge-label" }, label));
+      if (detail.target === "takeaway") {
+        const line = root.querySelector(".hs-head .hs-takeaway");
+        if (!line || line.parentElement.classList.contains("hs-takeaway-row")) continue;
+        // The badge sits beside the sentence (not inside it), so the sentence stays editable on the slide.
+        const row = h("div", { class: "hs-takeaway-row", "data-detail": "takeaway" });
+        line.replaceWith(row);
+        row.append(line, badge("根拠"));
+        continue;
+      }
       const targets = [...root.querySelectorAll(`[data-item="${cssEscape(detail.target)}"]`)];
       if (!targets.length) continue;
       for (const el of targets) el.dataset.detail = detail.target;
-      badgeAnchor(targets)?.append(h("span", { class: "hs-detail-badge", "aria-hidden": "true" }, plusIcon(), h("span", { class: "hs-badge-label" }, "詳しく")));
+      badgeAnchor(targets)?.append(badge(arr(detail.rows).length ? "内訳" : "詳しく"));
     }
   }
 
@@ -1626,6 +1936,7 @@
     get icons() { return ICONS; },
     setIcons(map) { ICONS = map || {}; },
     render, mount, fit, scale, fontHref, recommendedBuild, kineticOf, backdropOf, repaintCharts, mediaOf, youtubeId, numParts, splitLabel, strip, rich, icon, h, s, cssEscape, storyMap,
+    evalFormula, formulaTokens, rankShow, simUpdate, gapUpdate, fmtNum,
   });
   root.SlideEngine = Engine;
 })(typeof window !== "undefined" ? window : globalThis);

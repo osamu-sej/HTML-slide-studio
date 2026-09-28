@@ -55,11 +55,15 @@ export const HOVERS = ["lift", "focus", "tilt", "glow", "zoom"];
 export const EMPHASES = ["marker", "underline", "circle", "box", "glow", "none"];
 export const TRANSITIONS = ["fade", "slide", "zoom", "morph", "wipe", "circle", "push", "flip", "dive", "blinds", "curtain", "none"];
 export const transitionSchema = z.enum(TRANSITIONS);
-// Presentations only: text that opens when an item ("items[0]", "steps[2]") is clicked.
+// Presentations only: text that opens when an item ("items[0]", "steps[2]") — or the key message ("takeaway") —
+// is clicked. With a breakdown, a source or assumptions it opens as an evidence panel from the right.
 export const detailSchema = z.object({
   target: z.string().min(1).max(30),
   title: z.string().max(60).optional(),
   text: z.string().min(1).max(400),
+  rows: z.array(z.object({ label: z.string().min(1).max(40), value: z.string().max(30) })).max(8).optional(),
+  source: z.string().max(120).optional(),
+  note: z.string().max(200).optional(),
 });
 
 const shared = {
@@ -83,6 +87,8 @@ export const titledShape = {
   title: z.string().min(1).max(90),
   subhead: z.string().max(60).optional(),
   takeaway: z.string().max(160).optional(),
+  // Where the slide's figures come from (shown at the foot of the page and in chart tooltips).
+  source: z.string().max(120).optional(),
   details: z.array(detailSchema).max(12).optional(),
   ...shared,
 };
@@ -91,16 +97,25 @@ export const chartDatumSchema = z.object({
   label: z.string().max(80),
   value: z.number().optional(),
   barValue: z.number().optional(),
+  // "shift" charts: the value before (value is after).
+  before: z.number().optional(),
 });
 export const chartSeriesSchema = z.object({
   id: z.string().max(60).optional(),
   label: z.string().max(80).optional(),
   values: z.array(z.number()).max(24),
 });
+// "rank": a ranking the audience re-sorts by switching views (切り口); "shift": bars move from before to after (差分).
+export const CHART_TYPES = ["combo", "bar", "line", "donut", "multi-line", "stacked-bar", "100-stacked-bar", "rank", "shift"];
 export const chartImageSchema = z.object({
-  chartType: z.enum(["combo", "bar", "line", "donut", "multi-line", "stacked-bar", "100-stacked-bar"]),
+  chartType: z.enum(CHART_TYPES),
   data: z.object({
     title: z.string().max(120).optional(),
+    unit: z.string().max(10).optional(),
+    highlight: z.string().max(80).optional(),
+    beforeLabel: z.string().max(20).optional(),
+    afterLabel: z.string().max(20).optional(),
+    views: z.array(z.object({ label: z.string().min(1).max(20), items: z.array(chartDatumSchema).max(12) })).max(4).optional(),
     centerLabel: z.string().max(80).optional(),
     items: z.array(chartDatumSchema).max(24).optional(),
     xAxisLabels: z.array(z.string().max(80)).max(24).optional(),
@@ -145,7 +160,7 @@ export const slideSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("headerThreeSummary"), ...titledShape, items: z.array(cardItemSchema).min(3).max(3), summary: z.string().max(240).optional() }),
   z.object({ type: z.literal("funnel"), ...titledShape, levels: z.array(z.object({ title: z.string().min(1).max(60), description: z.string().max(160).optional() })).min(3).max(5) }),
   z.object({ type: z.literal("venn"), ...titledShape, items: z.array(cardItemSchema).min(2).max(3) }),
-  z.object({ type: z.literal("gantt"), ...titledShape, periods: z.array(z.string().min(1).max(20)).max(8).optional(), items: z.array(cardItemSchema.extend({ start: z.number().int().min(0).max(7).optional(), span: z.number().int().min(1).max(8).optional() })).min(2).max(7) }),
+  z.object({ type: z.literal("gantt"), ...titledShape, periods: z.array(z.string().min(1).max(20)).max(8).optional(), items: z.array(cardItemSchema.extend({ start: z.number().int().min(0).max(7).optional(), span: z.number().int().min(1).max(8).optional() })).min(2).max(7), now: z.number().min(0).max(8).optional() }),
   z.object({ type: z.literal("orgChart"), ...titledShape, root: z.string().max(80).optional(), items: z.array(cardItemSchema).min(2).max(5) }),
   z.object({ type: z.literal("checklist"), ...titledShape, items: z.array(cardItemSchema.extend({ done: z.boolean().optional() })).min(1).max(7) }),
   z.object({ type: z.literal("matrix"), ...titledShape, xLabel: z.string().max(30).optional(), yLabel: z.string().max(30).optional(), items: z.array(cardItemSchema).length(4) }),
@@ -156,6 +171,19 @@ export const slideSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("waterfall"), ...titledShape, unit: z.string().max(10).optional(), items: z.array(z.object({ label: z.string().min(1).max(40), value: z.number(), total: z.boolean().optional() })).min(2).max(8) }),
   z.object({ type: z.literal("logicTree"), ...titledShape, root: z.string().min(1).max(40), branches: z.array(z.object({ title: z.string().min(1).max(30), items: z.array(z.string().min(1).max(40)).max(3).optional(), highlight: z.boolean().optional() })).min(2).max(4) }),
   z.object({ type: z.literal("executiveSummary"), ...titledShape, conclusion: z.string().max(180).optional(), items: z.array(cardItemSchema).min(2).max(3), action: z.string().max(180).optional() }),
+  // 因果: conditions (sliders, a/b/c in order) and a formula; the result is recalculated as they move.
+  z.object({
+    type: z.literal("simulator"), ...titledShape,
+    inputs: z.array(z.object({ label: z.string().min(1).max(30), value: z.number(), min: z.number(), max: z.number(), step: z.number().min(0).optional(), unit: z.string().max(10).optional() })).min(1).max(3),
+    formula: z.string().min(1).max(80), resultLabel: z.string().max(30).optional(), resultUnit: z.string().max(10).optional(), digits: z.number().int().min(0).max(2).optional(),
+    compareLabel: z.string().max(20).optional(), compareValue: z.number().optional(),
+  }),
+  // 不足と打ち手: a target, where things stand, and measures that fill the gap as they are switched on.
+  z.object({
+    type: z.literal("gap"), ...titledShape, unit: z.string().max(10).optional(),
+    targetLabel: z.string().max(20).optional(), target: z.number(), currentLabel: z.string().max(20).optional(), current: z.number(),
+    measures: z.array(z.object({ title: z.string().min(1).max(30), value: z.number(), desc: z.string().max(60).optional() })).min(1).max(5),
+  }),
 ]);
 
 export const THEMES = ["clarity", "midnight", "editorial", "mono", "forest", "sunset", "aurora", "kinari"];
