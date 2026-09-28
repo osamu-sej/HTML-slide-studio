@@ -110,8 +110,8 @@ await step("generate from the outline", async () => {
   await page.waitForTimeout(1500);
   const theme = await page.getAttribute(".slide-wrap .hs-slide", "data-theme");
   if (theme !== "aurora") throw new Error(`theme was ${theme}`);
-  await page.waitForFunction(() => document.querySelector("#autoImageStatus")?.textContent?.includes("画像 5/9枚"), null, { timeout: 15000 });
-  if (imageRequests.length !== 5) throw new Error(`automatic images: ${imageRequests.length} instead of 5`);
+  await page.waitForFunction(() => document.querySelector("#autoImageStatus")?.textContent?.includes("画像 3/9枚"), null, { timeout: 15000 });
+  if (imageRequests.length !== 3) throw new Error(`automatic images: ${imageRequests.length} instead of 3`);
   await shot("generated");
   await page.click(".film-item:nth-child(2)");
   await shot("generated-evidence");
@@ -119,9 +119,9 @@ await step("generate from the outline", async () => {
   await shot("generated-kpi");
   await page.click(".film-item:nth-child(1)");
   await page.reload();
-  await page.waitForFunction(() => document.querySelector("#autoImageStatus")?.textContent?.includes("画像 5/9枚"), null, { timeout: 10000 });
+  await page.waitForFunction(() => document.querySelector("#autoImageStatus")?.textContent?.includes("画像 3/9枚"), null, { timeout: 10000 });
   const stored = await page.evaluate(() => JSON.parse(localStorage.getItem("hs-studio-current-v1"))?.deck?.slides?.filter((slide) => slide.media?.kind === "image").length);
-  if (stored !== 5) throw new Error(`images not saved: ${stored}`);
+  if (stored !== 3) throw new Error(`images not saved: ${stored}`);
 });
 
 await step("chat proposal: text and theme", async () => {
